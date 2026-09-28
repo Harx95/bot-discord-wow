@@ -24,13 +24,13 @@ Les étapes 1 à 5 sont donc prioritaires. L'étape 6 peut attendre la sortie.
 
 Le bot démarre, se connecte, répond à une commande.
 
-- [ ] Arborescence du projet, `pyproject.toml`, dépendances
-- [ ] Chargement de la configuration via pydantic-settings et `.env`
-- [ ] Connexion du bot, intents minimaux (members activé)
-- [ ] Synchronisation des commandes sur `GUILD_ID` au démarrage
-- [ ] Commande `/ping` qui répond « Pong »
-- [ ] Journalisation lisible dans la console
-- [ ] ruff et pyright configurés, aucune erreur
+- [x] Arborescence du projet, `pyproject.toml`, dépendances
+- [x] Chargement de la configuration via pydantic-settings et `.env`
+- [x] Connexion du bot, intents minimaux (members activé)
+- [x] Synchronisation des commandes sur `GUILD_ID` au démarrage
+- [x] Commande `/ping` qui répond « Pong »
+- [x] Journalisation lisible dans la console
+- [x] ruff et pyright configurés, aucune erreur
 
 Fini quand : `python -m bot` démarre et `/ping` répond sur le serveur.
 

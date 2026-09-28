@@ -8,7 +8,7 @@ Feuille de route : ROADMAP.md — ne traite QUE l'étape demandée.
 
 ## Stack
 
-- Python 3.12, discord.py 2.x
+- Python 3.13, discord.py 2.x
 - aiosqlite (SQL brut, pas d'ORM)
 - pydantic : configuration et définitions de sondages UNIQUEMENT
 - pyright (mode standard), ruff (lint + format)
