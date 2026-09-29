@@ -38,11 +38,11 @@ Fini quand : `python -m bot` démarre et `/ping` répond sur le serveur.
 
 Le schéma et la couche d'accès, sans aucune commande Discord.
 
-- [ ] Module de migrations : lit `migrations/*.sql`, applique celles qui manquent
-- [ ] Migration 001 : tables members, polls, poll_options, poll_votes
-- [ ] Dataclasses du domaine correspondantes
-- [ ] `MemberRepo` et `PollRepo` avec leurs méthodes de base
-- [ ] Tests unitaires des repositories sur une base temporaire
+- [x] Module de migrations : lit `migrations/*.sql`, applique celles qui manquent
+- [x] Migration 001 : tables members, polls, poll_options, poll_votes
+- [x] Dataclasses du domaine correspondantes
+- [x] `MemberRepo` et `PollRepo` avec leurs méthodes de base
+- [x] Tests unitaires des repositories sur une base temporaire
 
 Fini quand : les tests passent, et relancer le bot ne rejoue pas les migrations.
 

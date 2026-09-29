@@ -1,6 +1,7 @@
 """Application settings, loaded from the environment and the .env file."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +19,10 @@ class Settings(BaseSettings):
     discord_token: SecretStr = Field(description="Bot token issued by the Discord developer portal")
     guild_id: int = Field(description="Guild the application commands are synced to")
     log_level: str = Field(default="INFO", description="Root logging level")
+    database_path: Path = Field(
+        default=Path("data/bot.db"),
+        description="SQLite file; the parent directory is created on startup",
+    )
 
 
 @lru_cache(maxsize=1)

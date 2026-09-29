@@ -19,7 +19,18 @@ cp .env.example .env   # puis renseigner DISCORD_TOKEN et GUILD_ID
 ## Vérifications
 
 ```sh
-.venv/bin/ruff check src
-.venv/bin/ruff format --check src
+.venv/bin/ruff check src tests
+.venv/bin/ruff format --check src tests
 .venv/bin/pyright
+.venv/bin/pytest
 ```
+
+## Base de données
+
+SQLite, chemin dans `DATABASE_PATH` (`data/bot.db` par défaut). Le schéma est
+versionné dans `migrations/` : chaque fichier `.sql` est appliqué une seule fois,
+par ordre de nom, et enregistré dans `schema_migrations`. Les migrations sont
+jouées au démarrage du bot.
+
+Pour modifier le schéma, ajouter un fichier `migrations/00X_description.sql` —
+ne jamais éditer une migration déjà appliquée.
