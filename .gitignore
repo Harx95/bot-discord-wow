@@ -5,3 +5,5 @@ __pycache__/
 *.db
 *.db-journal
 data/
+assets/classes/*.png
+assets/roles/*.png

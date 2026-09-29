@@ -50,3 +50,28 @@ dans le message à chaque vote ; les noms des votants ne sont jamais affichés.
 
 Changer la clé d'un sondage déjà ouvert le détache de ses votes : la clé est
 l'identifiant stocké en base et inscrit dans les boutons.
+
+Ajouter une option à un sondage **déjà ouvert** ne l'ajoute pas en base : les
+options sont copiées à la création. Il faut supprimer le sondage et le rouvrir.
+
+## Classes et rôles
+
+Les classes, leurs couleurs et les rôles qu'elles peuvent tenir sont dans
+`classes.toml`, validé au démarrage.
+
+| Commande | Qui | Effet |
+|---|---|---|
+| `/roles-classes` | GM, Officier | Crée les rôles Discord de classe manquants |
+| `/classes` | GM, Officier | Poste le message de sélection dans le salon courant |
+| `/composition` | GM, Officier | Répartition tank / soigneur / DPS |
+
+Lancer `/roles-classes` **avant** `/classes`, sinon les membres déclarent leur
+classe sans recevoir la couleur correspondante.
+
+Seule la classe principale donne un rôle Discord : deux rôles de classe
+rendraient la couleur du pseudo dépendante de leur ordre dans la hiérarchie.
+Les rerolls sont enregistrés en base et comptés dans `/composition`.
+
+Le bot ne peut attribuer que des rôles situés **sous** le sien dans la
+hiérarchie. Les rôles de classe sont créés tout en bas, donc c'est acquis ;
+en revanche il ne peut pas attribuer Membre, Officier ni Maître de guilde.

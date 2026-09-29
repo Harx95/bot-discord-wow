@@ -6,12 +6,16 @@ import aiosqlite
 import discord
 from discord.ext import commands
 
+from bot.cogs.classes import DIRECTORY_KEY, Classes
 from bot.cogs.general import General
 from bot.cogs.polls import Polls
+from bot.emojis import EmojiStore
+from bot.rendering import directory_embed
 from bot.tree import GuildCommandTree
+from bot.views.classes import ClassButton, ResetButton, RoleButton
 from bot.views.poll import VoteButton
-from config import PollCatalog, Settings, load_catalog
-from db import apply_migrations, connect
+from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
+from db import ClassRepo, apply_migrations, connect
 
 _log = logging.getLogger(__name__)
 
@@ -40,6 +44,8 @@ class GuildBot(commands.Bot):
         self.settings = settings
         # Loaded eagerly: a malformed polls.toml must fail at startup, not on a command.
         self.catalog: PollCatalog = load_catalog(settings.polls_file)
+        self.classes: ClassCatalog = load_classes(settings.classes_file)
+        self.emojis_store = EmojiStore(self.classes)
         self._db: aiosqlite.Connection | None = None
 
     @property
@@ -63,15 +69,49 @@ class GuildBot(commands.Bot):
 
         # Registered once, for every poll: discord.py rebuilds each button from the
         # custom_id stored on the message, so nothing has to be re-registered per poll.
-        self.add_dynamic_items(VoteButton)
+        self.add_dynamic_items(VoteButton, ClassButton, RoleButton, ResetButton)
 
         await self.add_cog(General(self))
         await self.add_cog(Polls(self))
+        await self.add_cog(Classes(self))
+
+        await self.emojis_store.refresh(self)
 
         guild = self.guild_object
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
         _log.info("Synced %d command(s) to guild %d", len(synced), guild.id)
+
+    async def directory_embed(self) -> discord.Embed:
+        """The directory as it stands right now."""
+        entries = await ClassRepo(self.db).directory()
+        return directory_embed(self.classes, self.emojis_store, entries)
+
+    async def refresh_directory(self) -> None:
+        """Rewrite the directory message, if one was posted.
+
+        Failures are logged and swallowed: a member declaring their class must not see an
+        error because an officer deleted the directory message.
+        """
+        classes = ClassRepo(self.db)
+        managed = await classes.managed_message(DIRECTORY_KEY)
+        if managed is None:
+            return
+
+        channel = self.get_channel(managed.channel_id)
+        if not isinstance(channel, discord.TextChannel | discord.Thread):
+            _log.warning("Directory channel %d is gone", managed.channel_id)
+            await classes.forget_message(DIRECTORY_KEY)
+            return
+
+        try:
+            message = await channel.fetch_message(managed.message_id)
+            await message.edit(embed=await self.directory_embed())
+        except discord.NotFound:
+            _log.info("Directory message was deleted; forgetting it")
+            await classes.forget_message(DIRECTORY_KEY)
+        except discord.HTTPException as error:
+            _log.warning("Could not refresh the directory: %s", error)
 
     async def close(self) -> None:
         """Close the database alongside the Discord connection."""

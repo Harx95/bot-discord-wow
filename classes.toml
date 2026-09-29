@@ -1,0 +1,91 @@
+# Classes and raid roles. Edited without touching the code.
+#
+# WoW Forever is not out yet: the playable roles per class are configuration, not
+# assumptions baked into the code. The nine classes are available in both factions.
+# Skyborne, the paid race, has no Paladin — that belongs to a race poll, not here.
+#
+# colour  hex, used for the Discord role and therefore for the nickname colour.
+# emoji   unicode fallback, shown until the matching icon is uploaded by /emojis.
+#
+# max_choices  how many ranked choices a member may declare. The first one drives
+#              their Discord role, and therefore their nickname colour.
+
+max_choices = 3
+
+[[roles]]
+key = "tank"
+label = "Tank"
+emoji = "🛡️"
+
+[[roles]]
+key = "heal"
+label = "Soigneur"
+emoji = "💚"
+
+[[roles]]
+key = "dps"
+label = "DPS"
+emoji = "⚔️"
+
+[[classes]]
+key = "guerrier"
+emoji = "🗡️"
+name = "Guerrier"
+colour = "#C79C6E"
+roles = ["tank", "dps"]
+
+[[classes]]
+key = "paladin"
+emoji = "🔨"
+name = "Paladin"
+colour = "#F58CBA"
+roles = ["tank", "heal", "dps"]
+
+[[classes]]
+key = "chasseur"
+emoji = "🏹"
+name = "Chasseur"
+colour = "#ABD473"
+roles = ["dps"]
+
+[[classes]]
+key = "voleur"
+emoji = "🗝️"
+name = "Voleur"
+colour = "#FFF569"
+roles = ["dps"]
+
+[[classes]]
+key = "pretre"
+emoji = "✨"
+name = "Prêtre"
+colour = "#FFFFFF"
+roles = ["heal", "dps"]
+
+[[classes]]
+key = "chaman"
+emoji = "⚡"
+name = "Chaman"
+colour = "#0070DE"
+roles = ["heal", "dps"]
+
+[[classes]]
+key = "mage"
+emoji = "🔮"
+name = "Mage"
+colour = "#69CCF0"
+roles = ["dps"]
+
+[[classes]]
+key = "demoniste"
+emoji = "💀"
+name = "Démoniste"
+colour = "#9482C9"
+roles = ["dps"]
+
+[[classes]]
+key = "druide"
+emoji = "🌿"
+name = "Druide"
+colour = "#FF7D0A"
+roles = ["tank", "heal", "dps"]

@@ -6,7 +6,10 @@ import aiosqlite
 import pytest
 
 from db import apply_migrations, connect
-from db.migrations import split_statements
+from db.migrations import MIGRATIONS_DIR, split_statements
+
+# Derived from the directory so adding a migration does not require editing these tests.
+ALL_VERSIONS = sorted(path.stem for path in MIGRATIONS_DIR.glob("*.sql"))
 
 
 async def _table_names(connection: aiosqlite.Connection) -> set[str]:
@@ -24,7 +27,7 @@ async def test_records_the_applied_version(connection: aiosqlite.Connection) -> 
     async with connection.execute("SELECT version FROM schema_migrations") as cursor:
         versions = [row["version"] for row in await cursor.fetchall()]
 
-    assert versions == ["001_initial"]
+    assert sorted(versions) == ALL_VERSIONS
 
 
 async def test_second_run_applies_nothing(connection: aiosqlite.Connection) -> None:
@@ -37,7 +40,7 @@ async def test_reopening_the_file_applies_nothing(tmp_path: Path) -> None:
     path = tmp_path / "restart.db"
 
     first = await connect(path)
-    assert await apply_migrations(first) == ["001_initial"]
+    assert await apply_migrations(first) == ALL_VERSIONS
     await first.close()
 
     second = await connect(path)

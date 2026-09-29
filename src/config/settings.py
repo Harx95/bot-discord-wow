@@ -26,6 +26,14 @@ class Settings(BaseSettings):
         default=Path("polls.toml"),
         description="Poll definitions, read at startup",
     )
+    classes_file: Path = Field(
+        default=Path("classes.toml"),
+        description="Class and raid-role definitions, read at startup",
+    )
+    assets_dir: Path = Field(
+        default=Path("assets"),
+        description="Icons uploaded as application emojis by /emojis",
+    )
     database_path: Path = Field(
         default=Path("data/bot.db"),
         description="SQLite file; the parent directory is created on startup",

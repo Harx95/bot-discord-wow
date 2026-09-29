@@ -6,16 +6,24 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from config import PollCatalog, load_catalog
-from db import MemberRepo, PollRepo, apply_migrations, connect
+from config import ClassCatalog, PollCatalog, load_catalog, load_classes
+from db import ClassRepo, MemberRepo, PollRepo, apply_migrations, connect
 
-PROJECT_POLLS = Path(__file__).resolve().parents[1] / "polls.toml"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_POLLS = PROJECT_ROOT / "polls.toml"
+PROJECT_CLASSES = PROJECT_ROOT / "classes.toml"
 
 
 @pytest.fixture
 def catalog() -> PollCatalog:
     """The poll definitions actually shipped with the project."""
     return load_catalog(PROJECT_POLLS)
+
+
+@pytest.fixture
+def classes() -> ClassCatalog:
+    """The class definitions actually shipped with the project."""
+    return load_classes(PROJECT_CLASSES)
 
 
 @pytest.fixture
@@ -39,3 +47,9 @@ def members(connection: aiosqlite.Connection) -> MemberRepo:
 def polls(connection: aiosqlite.Connection) -> PollRepo:
     """Poll repository bound to the temporary database."""
     return PollRepo(connection)
+
+
+@pytest.fixture
+def class_repo(connection: aiosqlite.Connection) -> ClassRepo:
+    """Class repository bound to the temporary database."""
+    return ClassRepo(connection)

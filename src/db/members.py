@@ -6,7 +6,7 @@ from db.timestamps import from_iso, to_iso, utcnow
 from domain import Member
 
 
-def _to_member(row: aiosqlite.Row) -> Member:
+def row_to_member(row: aiosqlite.Row) -> Member:
     """Build a domain entity from a database row."""
     return Member(
         discord_id=row["discord_id"],
@@ -45,7 +45,7 @@ class MemberRepo:
             raise RuntimeError(f"Upsert of member {discord_id} returned no row")
 
         await self._db.commit()
-        return _to_member(row)
+        return row_to_member(row)
 
     async def get(self, discord_id: int) -> Member | None:
         """Fetch one member, or None if unknown."""
@@ -55,11 +55,11 @@ class MemberRepo:
         ) as cursor:
             row = await cursor.fetchone()
 
-        return _to_member(row) if row is not None else None
+        return row_to_member(row) if row is not None else None
 
     async def list_all(self) -> list[Member]:
         """Every known member, oldest first. discord_id breaks ties within the same instant."""
         async with self._db.execute(
             "SELECT * FROM members ORDER BY first_seen_at, discord_id"
         ) as cursor:
-            return [_to_member(row) for row in await cursor.fetchall()]
+            return [row_to_member(row) for row in await cursor.fetchall()]
