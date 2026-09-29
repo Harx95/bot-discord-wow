@@ -18,6 +18,15 @@ Les étapes 1 à 5 sont donc prioritaires. L'étape 6 peut attendre la sortie.
 
 - Hébergement final : VPS, Raspberry Pi ou plateforme ? (avant l'étape 5)
 
+## Décisions prises
+
+- **Création de sondages depuis Discord** : approche mixte retenue. `polls.toml`
+  reste la source des sondages structurants d'avant-lancement (faction, royaume,
+  Skyborne), dont les clés sont inscrites en base et dans les boutons. Une
+  commande de création à la volée, pour les sondages ponctuels d'après-sortie,
+  sera greffée sur l'étape 5 qui amène déjà les modales. Ne rien figer d'ici là
+  qui empêcherait un sondage défini en base plutôt qu'en fichier.
+
 ---
 
 ## Étape 1 — Squelette
@@ -50,13 +59,13 @@ Fini quand : les tests passent, et relancer le bot ne rejoue pas les migrations.
 
 Les trois sondages à choix limité, sans propositions ni combos.
 
-- [ ] Définition des sondages en configuration, validée par pydantic
-- [ ] Commande `/sondage <clé>`, réservée à GM et Officier
-- [ ] Vue persistante à boutons, `custom_id` stables
-- [ ] Un vote par personne, modifiable, stocké en base
-- [ ] Le message affiche les compteurs en direct
-- [ ] Commande `/resultats <clé>`, réservée à GM et Officier
-- [ ] Sondages : faction, type de royaume, pack Skyborne
+- [x] Définition des sondages en configuration, validée par pydantic
+- [x] Commande `/sondage <clé>`, réservée à GM et Officier
+- [x] Vue persistante à boutons, `custom_id` stables
+- [x] Un vote par personne, modifiable, stocké en base
+- [x] Le message affiche les compteurs en direct
+- [x] Commande `/resultats <clé>`, réservée à GM et Officier
+- [x] Sondages : faction, type de royaume, pack Skyborne
 
 Fini quand : le bot redémarre en plein sondage et les boutons fonctionnent encore.
 

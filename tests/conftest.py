@@ -6,7 +6,16 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
+from config import PollCatalog, load_catalog
 from db import MemberRepo, PollRepo, apply_migrations, connect
+
+PROJECT_POLLS = Path(__file__).resolve().parents[1] / "polls.toml"
+
+
+@pytest.fixture
+def catalog() -> PollCatalog:
+    """The poll definitions actually shipped with the project."""
+    return load_catalog(PROJECT_POLLS)
 
 
 @pytest.fixture

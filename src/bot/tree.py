@@ -8,6 +8,7 @@ from discord import app_commands
 _log = logging.getLogger(__name__)
 
 ERROR_MESSAGE = "Une erreur est survenue. Réessaie dans un instant."
+REFUSED_MESSAGE = "Tu n'as pas les droits pour cette commande."
 
 
 class GuildCommandTree(app_commands.CommandTree):
@@ -24,10 +25,18 @@ class GuildCommandTree(app_commands.CommandTree):
     ) -> None:
         """Log the failure and always answer the user, ephemerally."""
         command = interaction.command.name if interaction.command else "?"
-        _log.exception("Command /%s failed", command, exc_info=error)
+
+        if isinstance(error, app_commands.CheckFailure):
+            # A refused command is not a failure: it carries its own explanation and
+            # deserves no stack trace.
+            _log.info("Command /%s refused for %s: %s", command, interaction.user, error)
+            message = str(error) or REFUSED_MESSAGE
+        else:
+            _log.exception("Command /%s failed", command, exc_info=error)
+            message = ERROR_MESSAGE
 
         # The handler may have answered or deferred before failing.
         if interaction.response.is_done():
-            await interaction.followup.send(ERROR_MESSAGE, ephemeral=True)
+            await interaction.followup.send(message, ephemeral=True)
         else:
-            await interaction.response.send_message(ERROR_MESSAGE, ephemeral=True)
+            await interaction.response.send_message(message, ephemeral=True)

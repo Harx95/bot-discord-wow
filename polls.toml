@@ -1,0 +1,45 @@
+# Poll definitions. Edited without touching the code.
+#
+# key       stable identifier, used by /sondage and stored in the database.
+#           Changing it after a poll has opened orphans the existing votes.
+# label     shown on the button, 80 characters maximum.
+# emoji     optional, displayed before the label.
+
+[[polls]]
+key = "faction"
+title = "Quelle faction ?"
+description = """
+Vote décisif : la faction conditionne la réservation du nom de guilde, \
+du 27 octobre au 3 novembre. Clôture avant le 25 octobre.
+"""
+options = [
+    { key = "alliance", label = "Alliance", emoji = "🔵" },
+    { key = "horde", label = "Horde", emoji = "🔴" },
+    { key = "peu_importe", label = "Peu importe", emoji = "🤷" },
+]
+
+[[polls]]
+key = "royaume"
+title = "Quel type de royaume ?"
+description = """
+Normal pour du JcE tranquille, JcJ pour le monde ouvert contesté, \
+Roleplay pour l'ambiance. Clôture avant le 25 octobre.
+"""
+options = [
+    { key = "normal", label = "Normal", emoji = "🛡️" },
+    { key = "jcj", label = "JcJ", emoji = "⚔️" },
+    { key = "roleplay", label = "Roleplay", emoji = "🎭" },
+]
+
+[[polls]]
+key = "skyborne"
+title = "Le pack Skyborne t'intéresse-t-il ?"
+description = """
+Race payante, disponible dans les deux factions, sans accès Paladin. \
+Sondage indicatif : il sert à estimer la composition, pas à t'engager.
+"""
+options = [
+    { key = "oui", label = "Oui, je compte le prendre", emoji = "✅" },
+    { key = "peut_etre", label = "Peut-être, je verrai", emoji = "🤔" },
+    { key = "non", label = "Non", emoji = "❌" },
+]

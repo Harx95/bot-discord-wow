@@ -7,8 +7,10 @@ import discord
 from discord.ext import commands
 
 from bot.cogs.general import General
+from bot.cogs.polls import Polls
 from bot.tree import GuildCommandTree
-from config import Settings
+from bot.views.poll import VoteButton
+from config import PollCatalog, Settings, load_catalog
 from db import apply_migrations, connect
 
 _log = logging.getLogger(__name__)
@@ -36,6 +38,8 @@ class GuildBot(commands.Bot):
             tree_cls=GuildCommandTree,
         )
         self.settings = settings
+        # Loaded eagerly: a malformed polls.toml must fail at startup, not on a command.
+        self.catalog: PollCatalog = load_catalog(settings.polls_file)
         self._db: aiosqlite.Connection | None = None
 
     @property
@@ -57,7 +61,12 @@ class GuildBot(commands.Bot):
         if applied:
             _log.info("Applied %d migration(s): %s", len(applied), ", ".join(applied))
 
+        # Registered once, for every poll: discord.py rebuilds each button from the
+        # custom_id stored on the message, so nothing has to be re-registered per poll.
+        self.add_dynamic_items(VoteButton)
+
         await self.add_cog(General(self))
+        await self.add_cog(Polls(self))
 
         guild = self.guild_object
         self.tree.copy_global_to(guild=guild)
