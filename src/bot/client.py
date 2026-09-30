@@ -15,7 +15,7 @@ from bot.emojis import EmojiStore
 from bot.rendering import Declaration, alternates_board_embed, main_board_embed
 from bot.tree import GuildCommandTree
 from bot.views.classes import AlternateClassButton, MainClassButton, RoleButton
-from bot.views.poll import VoteButton
+from bot.views.poll import CloseCancelButton, CloseConfirmButton, VoteButton
 from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
 from db import ClassRepo, apply_migrations, connect
 
@@ -73,6 +73,8 @@ class GuildBot(commands.Bot):
         # custom_id stored on the message, so nothing has to be re-registered per poll.
         self.add_dynamic_items(
             VoteButton,
+            CloseConfirmButton,
+            CloseCancelButton,
             MainClassButton,
             AlternateClassButton,
             RoleButton,

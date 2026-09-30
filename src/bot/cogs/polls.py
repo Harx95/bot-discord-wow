@@ -9,7 +9,7 @@ from discord.ext import commands
 
 from bot.permissions import staff_only
 from bot.rendering import poll_embed, results_embed
-from bot.views.poll import build_poll_view
+from bot.views.poll import build_close_confirmation_view, build_poll_view
 from db import PollRepo
 
 if TYPE_CHECKING:
@@ -27,6 +27,11 @@ WRONG_CHANNEL = "Lance cette commande dans un salon textuel du serveur."
 MISSING_PERMISSIONS = (
     "Il me manque une permission dans ce salon : « Envoyer des messages » "
     "et « Intégrer des liens » sont nécessaires."
+)
+CONFIRM_CLOSE = (
+    "Clore **{title}** ? Les votes déjà enregistrés sont conservés et restent lisibles "
+    "avec `/resultats`, mais plus personne ne pourra voter et le sondage ne pourra pas "
+    "être rouvert."
 )
 
 
@@ -113,6 +118,38 @@ class Polls(commands.Cog):
             else "Sondage ouvert."
         )
         await interaction.followup.send(confirmation, ephemeral=True)
+
+    @app_commands.command(name="clore", description="Clôt un sondage, après confirmation.")
+    @app_commands.rename(cle="clé")
+    @app_commands.describe(cle="Le sondage à clore : choisis-le dans la liste.")
+    @app_commands.autocomplete(cle=_poll_keys)
+    @staff_only
+    async def close_poll(self, interaction: discord.Interaction, cle: str) -> None:
+        """Show what is about to be frozen, and ask before freezing it."""
+        await interaction.response.defer(ephemeral=True)
+
+        definition = self.bot.catalog.get(cle)
+        if definition is None:
+            await interaction.followup.send(UNKNOWN_POLL, ephemeral=True)
+            return
+
+        polls = PollRepo(self.bot.db)
+        poll = await polls.get_by_key(cle)
+        if poll is None:
+            await interaction.followup.send(NOT_OPENED.format(key=cle), ephemeral=True)
+            return
+
+        if not poll.is_open:
+            await interaction.followup.send(ALREADY_CLOSED, ephemeral=True)
+            return
+
+        tallies = await polls.results(poll.id)
+        await interaction.followup.send(
+            CONFIRM_CLOSE.format(title=definition.title),
+            embed=results_embed(poll, definition, tallies),
+            view=build_close_confirmation_view(cle),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="resultats", description="Affiche les résultats d'un sondage.")
     @app_commands.rename(cle="clé")

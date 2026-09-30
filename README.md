@@ -43,10 +43,16 @@ configuration empêche le bot de se lancer plutôt que de casser une commande.
 | Commande | Qui | Effet |
 |---|---|---|
 | `/sondage <clé>` | GM, Officier | Ouvre le sondage dans le salon courant, ou le réaffiche s'il existe déjà |
+| `/clore <clé>` | GM, Officier | Clôt le sondage, après confirmation |
 | `/resultats <clé>` | GM, Officier | Résultats classés, visibles par la seule personne qui demande |
 
 Un vote par personne, modifiable à tout moment. Les compteurs sont mis à jour
 dans le message à chaque vote ; les noms des votants ne sont jamais affichés.
+
+`/clore <clé>` ferme un sondage après confirmation : les résultats s'affichent
+avant d'agir, puis le message passe en gris et perd ses boutons. C'est définitif,
+il n'y a pas de réouverture. La clôture vaut en base, donc les boutons d'un
+ancien message réaffiché refusent le vote eux aussi.
 
 Changer la clé d'un sondage déjà ouvert le détache de ses votes : la clé est
 l'identifiant stocké en base et inscrit dans les boutons.

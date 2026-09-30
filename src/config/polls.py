@@ -21,13 +21,21 @@ EMBED_DESCRIPTION_LIMIT = 4096
 KEY_PATTERN = r"^[a-z0-9_]+$"
 KEY_MAX_LENGTH = 20
 
-# Shared with the vote button so the length check below matches what is actually sent.
+# Shared with the buttons so the length checks below match what is actually sent.
 VOTE_CUSTOM_ID_PREFIX = "poll:v"
+CLOSE_CUSTOM_ID_PREFIX = "poll:close"
+# The cancel button carries no state: it only puts the confirmation away.
+CANCEL_CLOSE_CUSTOM_ID = "poll:nc"
 
 
 def build_vote_custom_id(poll_key: str, option_key: str) -> str:
     """The custom_id carrying a vote. All the state a restarted bot needs."""
     return f"{VOTE_CUSTOM_ID_PREFIX}:{poll_key}:{option_key}"
+
+
+def build_close_custom_id(poll_key: str) -> str:
+    """The custom_id of the button confirming that a poll is closed for good."""
+    return f"{CLOSE_CUSTOM_ID_PREFIX}:{poll_key}"
 
 
 class OptionDefinition(BaseModel):
@@ -68,6 +76,10 @@ class PollDefinition(BaseModel):
             custom_id = build_vote_custom_id(self.key, key)
             if len(custom_id) > CUSTOM_ID_LIMIT:
                 raise ValueError(f"custom_id too long ({len(custom_id)} > {CUSTOM_ID_LIMIT})")
+
+        closing = build_close_custom_id(self.key)
+        if len(closing) > CUSTOM_ID_LIMIT:
+            raise ValueError(f"custom_id too long ({len(closing)} > {CUSTOM_ID_LIMIT})")
 
         return self
 

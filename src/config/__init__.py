@@ -11,16 +11,19 @@ from config.classes import (
     load_classes,
 )
 from config.polls import (
+    CANCEL_CLOSE_CUSTOM_ID,
     KEY_PATTERN,
     OptionDefinition,
     PollCatalog,
     PollDefinition,
+    build_close_custom_id,
     build_vote_custom_id,
     load_catalog,
 )
 from config.settings import Settings, get_settings
 
 __all__ = [
+    "CANCEL_CLOSE_CUSTOM_ID",
     "KEY_PATTERN",
     "ClassCatalog",
     "ClassDefinition",
@@ -31,6 +34,7 @@ __all__ = [
     "Settings",
     "Slot",
     "build_class_button_custom_id",
+    "build_close_custom_id",
     "build_role_button_custom_id",
     "build_vote_custom_id",
     "emoji_name",

@@ -9,8 +9,22 @@ import pytest
 
 from bot.permissions import is_staff
 from bot.rendering import NO_VOTES, poll_embed, results_embed
-from bot.views.poll import VOTE_TEMPLATE, VoteButton, build_poll_view
-from config import PollCatalog, build_vote_custom_id
+from bot.views.poll import (
+    CANCEL_TEMPLATE,
+    CLOSE_TEMPLATE,
+    VOTE_TEMPLATE,
+    CloseCancelButton,
+    CloseConfirmButton,
+    VoteButton,
+    build_close_confirmation_view,
+    build_poll_view,
+)
+from config import (
+    CANCEL_CLOSE_CUSTOM_ID,
+    PollCatalog,
+    build_close_custom_id,
+    build_vote_custom_id,
+)
 from config.polls import PollDefinition
 from domain import OptionTally, Poll, PollOption, PollStatus
 
@@ -100,6 +114,63 @@ def test_the_view_is_persistent_and_carries_one_button_per_option() -> None:
     assert view.timeout is None
     assert [cast(VoteButton, item).option_key for item in view.children] == ["alliance", "horde"]
     assert all(item.is_persistent() for item in view.children)
+
+
+# --- closing a poll ------------------------------------------------------------------
+
+
+def test_the_close_template_matches_every_configured_poll(catalog: PollCatalog) -> None:
+    for definition in catalog.polls:
+        match = CLOSE_TEMPLATE.fullmatch(build_close_custom_id(definition.key))
+
+        assert match is not None
+        assert match["poll"] == definition.key
+
+
+def test_the_cancel_template_matches_its_custom_id() -> None:
+    assert CANCEL_TEMPLATE.fullmatch(CANCEL_CLOSE_CUSTOM_ID) is not None
+
+
+def test_every_poll_custom_id_matches_exactly_one_template(catalog: PollCatalog) -> None:
+    """Two matches would make the handler depend on registration order; none would be dead."""
+    templates = (VOTE_TEMPLATE, CLOSE_TEMPLATE, CANCEL_TEMPLATE)
+
+    sent = [CANCEL_CLOSE_CUSTOM_ID]
+    for definition in catalog.polls:
+        sent.append(build_close_custom_id(definition.key))
+        sent.extend(build_vote_custom_id(definition.key, o.key) for o in definition.options)
+
+    for custom_id in sent:
+        matching = [t for t in templates if t.fullmatch(custom_id) is not None]
+        assert len(matching) == 1, f"{custom_id} matched {len(matching)} templates"
+
+
+async def test_from_custom_id_restores_the_poll_being_closed() -> None:
+    """After a restart the confirmation has to know which poll it was about."""
+    match = CLOSE_TEMPLATE.fullmatch(build_close_custom_id("faction"))
+    assert match is not None
+
+    button = await CloseConfirmButton.from_custom_id(
+        cast(discord.Interaction, None),
+        cast(discord.ui.Item[discord.ui.View], None),
+        match,
+    )
+
+    assert button.poll_key == "faction"
+
+
+def test_the_confirmation_offers_a_way_out_and_looks_destructive() -> None:
+    view = build_close_confirmation_view("faction")
+
+    assert view.timeout is None
+    assert len(view.children) == 2
+    assert all(item.is_persistent() for item in view.children)
+
+    confirm, cancel = view.children
+    assert isinstance(confirm, CloseConfirmButton)
+    assert isinstance(cancel, CloseCancelButton)
+    assert confirm.item.style is discord.ButtonStyle.danger
+    assert cancel.item.style is discord.ButtonStyle.secondary
 
 
 # --- staff check ---------------------------------------------------------------------

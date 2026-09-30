@@ -5,7 +5,10 @@ Chaque étape se termine par : test manuel réussi, puis commit, puis rendu d'ex
 
 ## Où on en est — 30 septembre 2026
 
-Étapes 1 à 4 terminées, testées sur le serveur et commitées.
+Étapes 1 à 4bis terminées, testées sur le serveur et commitées. Les trois
+sondages structurants peuvent donc être clos dès que tu as tranché ; l'échéance
+du 25 octobre n'est plus bloquée par le code.
+
 **Prochaine étape : la 5**, le sondage du nom de guilde. Elle amène les modales,
 sur lesquelles se greffera la commande de création de sondage à la volée.
 
@@ -69,9 +72,6 @@ serveur, le bot ne peut pas s'en charger :
 
 ### Manques connus, dans aucune étape
 
-- **Rien ne clôture un sondage.** `PollRepo.close()` existe et est testée, mais
-  aucune commande ne l'appelle. La contrainte de calendrier ci-dessous impose une
-  clôture avant le 25 octobre : il faut une commande quelque part avant.
 - **Ajouter une option à un sondage déjà ouvert** ne l'ajoute pas en base : les
   options sont copiées à la création. Il faut supprimer le sondage et le rouvrir.
 - **Aucune commande d'officier n'efface les choix de quelqu'un d'autre.** Chacun
@@ -223,6 +223,60 @@ en cas de promotion où les deux le sont.
 
 Reste ouvert, hors étape : `/classes` relancée poste deux nouveaux messages et
 fige les anciens, qui gardent des boutons actifs. À supprimer à la main.
+
+## Étape 4bis — Clôture des sondages
+
+Hors feuille de route initiale, ajoutée le 30 septembre : `PollRepo.close()`
+existait et était testée, mais rien ne l'appelait, et les sondages Faction,
+Type de royaume et Nom de guilde doivent être clos avant le 25 octobre.
+
+Une commande plutôt qu'un bouton sous le sondage : un composant fait partie du
+message, donc un bouton « Clore » serait visible et cliquable par tous les
+membres, avec un refus à la clé. Discord ne sait pas masquer un bouton selon le
+rôle. La commande, elle, suit `/sondage` et `/resultats` et reste invisible.
+
+Pas de réouverture : `/clore` montre les résultats et demande confirmation
+avant d'agir. Une fois confirmée, la clôture est définitive.
+
+- [x] `/clore <clé>`, réservée à GM et Officier, même autocomplétion que `/sondage`
+- [x] Confirmation éphémère portant les résultats classés, avec « Clore
+      définitivement » et « Annuler »
+- [x] Boutons de confirmation persistants comme les autres : `timeout=None`,
+      clé dans le `custom_id`, rien en mémoire
+- [x] À la confirmation : message du sondage réécrit en gris, pied « Sondage
+      clos. », boutons de vote retirés
+- [x] Clôture valable même si le message public est irrécupérable, avec un
+      avertissement dans la réponse
+- [x] Clore un sondage déjà clos est dit, pas rejoué
+
+Fini quand : `/clore` sur un sondage voté fige son message, et un clic sur un
+bouton de vote d'un ancien message répond « Ce sondage est clos ».
+
+### Scénario de recette — passé le 30 septembre 2026
+
+Déroulé sur le serveur, tout est passé. Conservé comme non-régression.
+
+| # | Action | Attendu |
+|---|--------|---------|
+| 1 | `/clore` sur un sondage jamais ouvert | « Ce sondage n'a pas encore été ouvert » |
+| 2 | `/sondage clé:faction`, voter à 2 comptes si possible | Compteurs à jour |
+| 3 | `/clore clé:faction` | Éphémère : résultats classés + les deux boutons |
+| 4 | « Annuler » | « Annulé. Le sondage reste ouvert. » Le message public n'a pas bougé, on peut encore voter |
+| 5 | `/clore clé:faction` → « Clore définitivement » | Message public en gris, « Sondage clos. », **plus aucun bouton** |
+| 6 | `/resultats clé:faction` | Résultats toujours lisibles, « Sondage clos » |
+| 7 | `/clore clé:faction` | « Ce sondage est clos » — pas de confirmation proposée |
+| 8 | `/sondage clé:faction` | Refusé : un sondage clos ne se réaffiche pas |
+| 9 | Réafficher un sondage avant clôture, le clore, cliquer un vote sur **l'ancien** message | « Ce sondage est clos, les votes ne sont plus pris en compte » |
+| 10 | `Ctrl-C` pendant qu'une confirmation est ouverte, relancer, cliquer « Clore définitivement » | Le bouton répond encore |
+
+L'étape 9 vérifie que la clôture est étanche en base et pas seulement à
+l'écran : seul le dernier message est réécrit, les anciens gardent leurs
+boutons, et c'est `handle_vote` qui les rend inoffensifs.
+
+L'étape 10 vérifie la persistance des boutons de confirmation.
+
+Reste ouvert : un sondage clos par erreur ne se rouvre qu'en base. C'était le
+choix retenu, la confirmation servant de garde-fou.
 
 ## Étape 5 — Sondage nom de guilde
 

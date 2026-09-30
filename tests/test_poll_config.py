@@ -8,6 +8,7 @@ from config.polls import (
     BUTTON_LABEL_LIMIT,
     CUSTOM_ID_LIMIT,
     PollDefinition,
+    build_close_custom_id,
     build_vote_custom_id,
 )
 
@@ -96,6 +97,11 @@ def test_every_custom_id_fits_within_the_api_limit(catalog: PollCatalog) -> None
     for definition in catalog.polls:
         for option in definition.options:
             assert len(build_vote_custom_id(definition.key, option.key)) <= CUSTOM_ID_LIMIT
+
+
+def test_every_closing_custom_id_fits_within_the_api_limit(catalog: PollCatalog) -> None:
+    for definition in catalog.polls:
+        assert len(build_close_custom_id(definition.key)) <= CUSTOM_ID_LIMIT
 
 
 def test_get_returns_none_for_an_unknown_key(catalog: PollCatalog) -> None:
