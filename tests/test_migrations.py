@@ -72,3 +72,90 @@ def test_split_statements_ignores_semicolons_in_comments_and_strings() -> None:
 def test_split_statements_rejects_an_unterminated_statement() -> None:
     with pytest.raises(ValueError, match="Unterminated"):
         split_statements("CREATE TABLE t (a TEXT)")
+
+
+async def test_003_carries_existing_votes_over_and_lifts_the_one_vote_rule(
+    tmp_path: Path,
+) -> None:
+    """The upgrade path with data in it, which a fresh database never exercises.
+
+    A vote recorded under the old PRIMARY KEY (poll_id, member_id) must survive the rebuild,
+    and backing a second option must become possible afterwards.
+    """
+    path = tmp_path / "upgrade.db"
+    earlier = [p for p in sorted(MIGRATIONS_DIR.glob("*.sql")) if p.stem < "003"]
+
+    connection = await connect(path)
+    try:
+        # The state the database was in before this migration existed: the earlier ones
+        # applied and recorded, so the runner only has 003 left to do.
+        await connection.executescript(
+            "CREATE TABLE schema_migrations (version TEXT NOT NULL PRIMARY KEY, "
+            "applied_at TEXT NOT NULL) STRICT"
+        )
+        for migration in earlier:
+            await connection.executescript(migration.read_text(encoding="utf-8"))
+            await connection.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (migration.stem, "2026-09-01T00:00:00+00:00"),
+            )
+        await connection.executescript(
+            """
+            INSERT INTO members (discord_id, display_name, first_seen_at, last_seen_at)
+            VALUES (1, 'Kaeldin', '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00');
+            INSERT INTO polls (id, key, title, created_at)
+            VALUES (1, 'faction', 'Quelle faction ?', '2026-09-01T00:00:00+00:00');
+            INSERT INTO poll_options (id, poll_id, key, label, position, created_at)
+            VALUES (1, 1, 'alliance', 'Alliance', 0, '2026-09-01T00:00:00+00:00'),
+                   (2, 1, 'horde', 'Horde', 1, '2026-09-01T00:00:00+00:00');
+            INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at)
+            VALUES (1, 1, 1, '2026-09-01T00:00:00+00:00');
+            """
+        )
+        await connection.commit()
+
+        applied = await apply_migrations(connection)
+        assert "003_multiple_votes" in applied
+
+        # The vote cast before the rebuild is still there.
+        async with connection.execute("SELECT option_id FROM poll_votes") as cursor:
+            assert [row["option_id"] for row in await cursor.fetchall()] == [1]
+
+        # And the member can now back the other option as well.
+        await connection.execute(
+            "INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at) VALUES (?,?,?,?)",
+            (1, 1, 2, "2026-09-02T00:00:00+00:00"),
+        )
+        await connection.commit()
+
+        async with connection.execute("SELECT COUNT(*) AS n FROM poll_votes") as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row["n"] == 2
+    finally:
+        await connection.close()
+
+
+async def test_a_member_cannot_back_the_same_option_twice(
+    connection: aiosqlite.Connection,
+) -> None:
+    """The rebuilt primary key still stops a reaction event from being counted twice."""
+    await connection.executescript(
+        """
+        INSERT INTO members (discord_id, display_name, first_seen_at, last_seen_at)
+        VALUES (1, 'Kaeldin', '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00');
+        INSERT INTO polls (id, key, title, created_at)
+        VALUES (1, 'faction', 'Quelle faction ?', '2026-09-01T00:00:00+00:00');
+        INSERT INTO poll_options (id, poll_id, key, label, position, created_at)
+        VALUES (1, 1, 'alliance', 'Alliance', 0, '2026-09-01T00:00:00+00:00');
+        INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at)
+        VALUES (1, 1, 1, '2026-09-01T00:00:00+00:00');
+        """
+    )
+    await connection.commit()
+
+    with pytest.raises(aiosqlite.IntegrityError):
+        await connection.execute(
+            "INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at) VALUES (?,?,?,?)",
+            (1, 1, 1, "2026-09-02T00:00:00+00:00"),
+        )

@@ -10,9 +10,7 @@ from bot.views.classes import (
 from bot.views.poll import (
     CloseCancelButton,
     CloseConfirmButton,
-    VoteButton,
     build_close_confirmation_view,
-    build_poll_view,
 )
 
 __all__ = [
@@ -21,9 +19,7 @@ __all__ = [
     "CloseConfirmButton",
     "MainClassButton",
     "RoleButton",
-    "VoteButton",
     "build_alternates_view",
     "build_close_confirmation_view",
     "build_main_view",
-    "build_poll_view",
 ]

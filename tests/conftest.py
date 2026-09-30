@@ -6,6 +6,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
+from bot.emojis import EmojiStore
 from config import ClassCatalog, PollCatalog, load_catalog, load_classes
 from db import ClassRepo, MemberRepo, PollRepo, apply_migrations, connect
 
@@ -24,6 +25,16 @@ def catalog() -> PollCatalog:
 def classes() -> ClassCatalog:
     """The class definitions actually shipped with the project."""
     return load_classes(PROJECT_CLASSES)
+
+
+@pytest.fixture
+def emojis(classes: ClassCatalog) -> EmojiStore:
+    """A store that fetched nothing, so every icon falls back to its configured unicode.
+
+    That is also the state the bot runs in when an icon is missing from the server, which
+    is the case worth keeping under test: a poll must stay votable either way.
+    """
+    return EmojiStore(classes, guild_id=0)
 
 
 @pytest.fixture

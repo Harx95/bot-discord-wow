@@ -8,9 +8,11 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.permissions import staff_only
+from bot.reactions import add_ballot_reactions, fetch_poll_message
 from bot.rendering import poll_embed, results_embed
-from bot.views.poll import build_close_confirmation_view, build_poll_view
+from bot.views.poll import build_close_confirmation_view
 from db import PollRepo
+from domain import Poll
 
 if TYPE_CHECKING:
     from bot.client import GuildBot
@@ -25,14 +27,36 @@ NOT_OPENED = "Ce sondage n'a pas encore été ouvert. Lance `/sondage {key}` d'a
 ALREADY_CLOSED = "Ce sondage est clos. Ses résultats restent consultables avec `/resultats`."
 WRONG_CHANNEL = "Lance cette commande dans un salon textuel du serveur."
 MISSING_PERMISSIONS = (
-    "Il me manque une permission dans ce salon : « Envoyer des messages » "
-    "et « Intégrer des liens » sont nécessaires."
+    "Il me manque une permission dans ce salon. Un sondage se vote en réagissant, "
+    "donc il me faut « Envoyer des messages », « Intégrer des liens », "
+    "« Ajouter des réactions », « Voir les anciens messages » et « Gérer les messages » "
+    "— la dernière me sert à retirer les réactions qui ne sont pas au menu.\n"
+    "Manquantes ici : {missing}."
 )
 CONFIRM_CLOSE = (
     "Clore **{title}** ? Les votes déjà enregistrés sont conservés et restent lisibles "
     "avec `/resultats`, mais plus personne ne pourra voter et le sondage ne pourra pas "
     "être rouvert."
 )
+STILL_DISPLAYED = (
+    "Ce sondage est déjà affiché et a reçu {votes}. Le réafficher les perdrait : un vote "
+    "est une réaction, et les réactions restent sur l'ancien message.\n"
+    "Va au message existant, ou supprime-le d'abord si tu veux repartir de zéro."
+)
+
+# Everything a poll message needs, in the order the refusal lists them.
+REQUIRED_PERMISSIONS = {
+    "send_messages": "« Envoyer des messages »",
+    "embed_links": "« Intégrer des liens »",
+    "add_reactions": "« Ajouter des réactions »",
+    "read_message_history": "« Voir les anciens messages »",
+    "manage_messages": "« Gérer les messages »",
+}
+
+
+def _missing_permissions(permissions: discord.Permissions) -> list[str]:
+    """The permissions a poll message needs and does not have, in French."""
+    return [label for name, label in REQUIRED_PERMISSIONS.items() if not getattr(permissions, name)]
 
 
 class Polls(commands.Cog):
@@ -57,6 +81,20 @@ class Polls(commands.Cog):
             app_commands.Choice(name=d.title[:CHOICE_NAME_LIMIT], value=d.key)
             for d in matches[:AUTOCOMPLETE_LIMIT]
         ]
+
+    async def _may_repost(self, poll: Poll) -> bool:
+        """Whether reposting this poll would throw votes away.
+
+        A vote is a reaction on the attached message, so a second message starts from an
+        empty ballot box while the database still holds the old counts — and the next
+        reconciliation would then wipe them. Reposting is therefore allowed only when there
+        is nothing to lose: no vote recorded, or the message is gone anyway.
+        """
+        total = sum(tally.votes for tally in await PollRepo(self.bot.db).results(poll.id))
+        if total == 0:
+            return True
+
+        return await fetch_poll_message(self.bot, poll) is None
 
     @app_commands.command(name="sondage", description="Ouvre un sondage dans ce salon.")
     # The Python identifier stays ASCII; only what Discord displays carries the accent.
@@ -86,9 +124,11 @@ class Polls(commands.Cog):
 
         # Checked before writing anything, so a missing permission cannot leave a poll
         # recorded with no message to vote on.
-        permissions = channel.permissions_for(interaction.guild.me)
-        if not (permissions.send_messages and permissions.embed_links):
-            await interaction.followup.send(MISSING_PERMISSIONS, ephemeral=True)
+        missing = _missing_permissions(channel.permissions_for(interaction.guild.me))
+        if missing:
+            await interaction.followup.send(
+                MISSING_PERMISSIONS.format(missing=", ".join(missing)), ephemeral=True
+            )
             return
 
         polls = PollRepo(self.bot.db)
@@ -101,19 +141,30 @@ class Polls(commands.Cog):
         reposted = poll is not None
         if poll is None:
             poll = await polls.create(cle, definition.title, definition.option_pairs)
+        elif not await self._may_repost(poll):
+            total = sum(tally.votes for tally in await polls.results(poll.id))
+            plural = "vote" if total <= 1 else "votes"
+            await interaction.followup.send(
+                STILL_DISPLAYED.format(votes=f"{total} {plural}"), ephemeral=True
+            )
+            return
 
         tallies = await polls.results(poll.id)
         message = await channel.send(
-            embed=poll_embed(poll, definition, tallies),
-            view=build_poll_view(definition),
+            embed=poll_embed(poll, definition, tallies, self.bot.emojis_store)
         )
-        # The newest message becomes the one the poll points at.
+        # The newest message becomes the one the poll points at, and only that one counts:
+        # a reaction on an older message finds no poll and is ignored.
         await polls.attach_message(poll.id, channel.id, message.id)
+        # The ballot itself. Posted after attaching, so the bot's own reactions already
+        # resolve to this poll and are skipped rather than counted.
+        await add_ballot_reactions(message, definition, self.bot.emojis_store)
         _log.info("Poll %r %s by %s", cle, "reposted" if reposted else "opened", interaction.user)
 
         confirmation = (
-            "Sondage réaffiché. Les votes déjà enregistrés sont conservés, et les boutons "
-            "de l'ancien message restent valides."
+            "Sondage réaffiché. Les votes déjà enregistrés sont conservés, mais ils sont "
+            "désormais portés par ce message : pense à supprimer l'ancien, dont les "
+            "réactions ne comptent plus."
             if reposted
             else "Sondage ouvert."
         )
@@ -146,7 +197,7 @@ class Polls(commands.Cog):
         tallies = await polls.results(poll.id)
         await interaction.followup.send(
             CONFIRM_CLOSE.format(title=definition.title),
-            embed=results_embed(poll, definition, tallies),
+            embed=results_embed(poll, definition, tallies, self.bot.emojis_store),
             view=build_close_confirmation_view(cle),
             ephemeral=True,
         )
@@ -173,6 +224,6 @@ class Polls(commands.Cog):
 
         tallies = await polls.results(poll.id)
         await interaction.followup.send(
-            embed=results_embed(poll, definition, tallies),
+            embed=results_embed(poll, definition, tallies, self.bot.emojis_store),
             ephemeral=True,
         )

@@ -12,8 +12,10 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Discord API limits.
-BUTTON_LABEL_LIMIT = 80
-BUTTONS_PER_VIEW = 25
+OPTION_LABEL_LIMIT = 80
+# Votes are cast by reacting, and a message holds 20 distinct reactions at most. This is
+# lower than the 25 components a message could carry, and it is what caps a poll now.
+REACTIONS_PER_MESSAGE = 20
 CUSTOM_ID_LIMIT = 100
 EMBED_TITLE_LIMIT = 256
 EMBED_DESCRIPTION_LIMIT = 4096
@@ -21,16 +23,23 @@ EMBED_DESCRIPTION_LIMIT = 4096
 KEY_PATTERN = r"^[a-z0-9_]+$"
 KEY_MAX_LENGTH = 20
 
-# Shared with the buttons so the length checks below match what is actually sent.
-VOTE_CUSTOM_ID_PREFIX = "poll:v"
+# Discord's own rule for a custom emoji name, which is how an option names its icon.
+EMOJI_NAME_PATTERN = r"^[A-Za-z0-9_]{2,32}$"
+
+# U+FE0F asks for the coloured rendering of a character that also has a text form, as in
+# "🛡️". Discord does not always echo it back on a reaction, so it is dropped on both sides
+# of every comparison rather than trusted.
+VARIATION_SELECTOR = "️"
+
+
+def normalise_ballot(ballot: str) -> str:
+    """The comparable form of a ballot: a custom emoji name, or a bare unicode character."""
+    return ballot.replace(VARIATION_SELECTOR, "")
+
+
 CLOSE_CUSTOM_ID_PREFIX = "poll:close"
 # The cancel button carries no state: it only puts the confirmation away.
 CANCEL_CLOSE_CUSTOM_ID = "poll:nc"
-
-
-def build_vote_custom_id(poll_key: str, option_key: str) -> str:
-    """The custom_id carrying a vote. All the state a restarted bot needs."""
-    return f"{VOTE_CUSTOM_ID_PREFIX}:{poll_key}:{option_key}"
 
 
 def build_close_custom_id(poll_key: str) -> str:
@@ -39,13 +48,29 @@ def build_close_custom_id(poll_key: str) -> str:
 
 
 class OptionDefinition(BaseModel):
-    """One choice offered by a poll."""
+    """One choice offered by a poll.
+
+    The emoji is the ballot, not decoration: it is what members react with, so every option
+    needs one and no two options of a poll may share it.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     key: str = Field(pattern=KEY_PATTERN, max_length=KEY_MAX_LENGTH)
-    label: str = Field(min_length=1, max_length=BUTTON_LABEL_LIMIT)
-    emoji: str | None = None
+    label: str = Field(min_length=1, max_length=OPTION_LABEL_LIMIT)
+    # A unicode emoji, used as the ballot on its own when no icon is configured.
+    emoji: str = Field(min_length=1)
+    # Name of a server emoji to use instead. Falls back to the unicode one until it exists.
+    icon: str | None = Field(default=None, pattern=EMOJI_NAME_PATTERN)
+
+    @property
+    def ballot(self) -> str:
+        """What identifies this option among the reactions: icon name, else unicode emoji.
+
+        Custom emojis are matched by name rather than by id, so re-uploading one to the
+        server keeps every recorded vote attached to its option.
+        """
+        return normalise_ballot(self.icon or self.emoji)
 
 
 class PollDefinition(BaseModel):
@@ -56,7 +81,9 @@ class PollDefinition(BaseModel):
     key: str = Field(pattern=KEY_PATTERN, max_length=KEY_MAX_LENGTH)
     title: str = Field(min_length=1, max_length=EMBED_TITLE_LIMIT)
     description: str = Field(default="", max_length=EMBED_DESCRIPTION_LIMIT)
-    options: tuple[OptionDefinition, ...] = Field(min_length=1, max_length=BUTTONS_PER_VIEW)
+    # When true a member may back several options at once, by reacting to each of them.
+    multiple: bool = False
+    options: tuple[OptionDefinition, ...] = Field(min_length=1, max_length=REACTIONS_PER_MESSAGE)
 
     @field_validator("description")
     @classmethod
@@ -66,16 +93,17 @@ class PollDefinition(BaseModel):
 
     @model_validator(mode="after")
     def _check_options(self) -> Self:
-        """Option keys must be unique, and every custom_id must fit within the API limit."""
+        """Option keys and ballots must be unique, and the close custom_id must fit."""
         keys = [option.key for option in self.options]
         duplicates = {key for key in keys if keys.count(key) > 1}
         if duplicates:
             raise ValueError(f"duplicate option keys in poll {self.key!r}: {sorted(duplicates)}")
 
-        for key in keys:
-            custom_id = build_vote_custom_id(self.key, key)
-            if len(custom_id) > CUSTOM_ID_LIMIT:
-                raise ValueError(f"custom_id too long ({len(custom_id)} > {CUSTOM_ID_LIMIT})")
+        # Two options sharing an emoji would make a reaction impossible to attribute.
+        ballots = [option.ballot for option in self.options]
+        shared = {ballot for ballot in ballots if ballots.count(ballot) > 1}
+        if shared:
+            raise ValueError(f"duplicate emojis in poll {self.key!r}: {sorted(shared)}")
 
         closing = build_close_custom_id(self.key)
         if len(closing) > CUSTOM_ID_LIMIT:
@@ -86,6 +114,14 @@ class PollDefinition(BaseModel):
     def option(self, key: str) -> OptionDefinition | None:
         """Look up one option by key."""
         return next((option for option in self.options if option.key == key), None)
+
+    def option_for_ballot(self, ballot: str) -> OptionDefinition | None:
+        """The option a reaction stands for, or None when the emoji is not on the ballot.
+
+        `ballot` is the custom emoji's name, or the unicode character itself.
+        """
+        wanted = normalise_ballot(ballot)
+        return next((option for option in self.options if option.ballot == wanted), None)
 
     @property
     def option_pairs(self) -> list[tuple[str, str]]:

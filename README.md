@@ -46,19 +46,63 @@ configuration empêche le bot de se lancer plutôt que de casser une commande.
 | `/clore <clé>` | GM, Officier | Clôt le sondage, après confirmation |
 | `/resultats <clé>` | GM, Officier | Résultats classés, visibles par la seule personne qui demande |
 
-Un vote par personne, modifiable à tout moment. Les compteurs sont mis à jour
-dans le message à chaque vote ; les noms des votants ne sont jamais affichés.
+### Voter
+
+**On vote en réagissant.** Le bot pose lui-même une réaction par option sous le
+message : ce sont les bulletins, il suffit de cliquer dessus. Recliquer retire
+son vote. Les compteurs se mettent à jour dans le message ; les noms des votants
+ne sont jamais affichés.
+
+Un sondage accepte un seul choix par personne, sauf s'il porte `multiple = true`
+dans `polls.toml` — c'est le cas de Faction, où réagir avec les deux emojis dit
+que les deux conviennent. Sur un sondage à choix unique, réagir ailleurs déplace
+le vote et le bot retire l'ancienne réaction.
+
+Une réaction qui n'est pas au menu est retirée, de même qu'une réaction sur un
+sondage clos. Il faut donc « Gérer les messages » au bot, en plus de « Ajouter
+des réactions » et « Voir les anciens messages » ; `/sondage` vérifie tout ça
+avant d'écrire quoi que ce soit et dit précisément ce qui manque.
+
+Une réaction ne passe pas par une interaction : le bot ne peut donc **rien
+répondre** au votant, pas même un message éphémère. Le compteur du message est
+le seul accusé de réception.
+
+Discord ne rejoue jamais un événement de réaction. Une réaction posée pendant
+que le bot est éteint serait donc invisible pour toujours : au démarrage, le bot
+relit les réactions de chaque sondage ouvert et réaligne la base dessus. Le
+message fait foi, pas la base.
+
+### Limites à connaître
+
+Un message plafonne à **20 réactions distinctes**, ce qui plafonne un sondage à
+20 options — et non 25 comme les boutons le permettaient.
+
+`/sondage` sur un sondage déjà affiché et déjà voté est **refusé** : les votes
+vivent sous forme de réactions sur le message en cours, un second message
+repartirait d'une urne vide et la réconciliation suivante effacerait les
+compteurs. Le réaffichage reste possible tant que personne n'a voté, ou si le
+message a disparu.
 
 `/clore <clé>` ferme un sondage après confirmation : les résultats s'affichent
-avant d'agir, puis le message passe en gris et perd ses boutons. C'est définitif,
-il n'y a pas de réouverture. La clôture vaut en base, donc les boutons d'un
-ancien message réaffiché refusent le vote eux aussi.
+avant d'agir, puis le message passe en gris et ses réactions sont retirées.
+C'est définitif, il n'y a pas de réouverture. La clôture vaut en base, donc une
+réaction reposée sur un ancien message est retirée elle aussi.
 
 Changer la clé d'un sondage déjà ouvert le détache de ses votes : la clé est
-l'identifiant stocké en base et inscrit dans les boutons.
+l'identifiant stocké en base.
 
 Ajouter une option à un sondage **déjà ouvert** ne l'ajoute pas en base : les
 options sont copiées à la création. Il faut supprimer le sondage et le rouvrir.
+
+### Emojis d'un sondage
+
+Chaque option porte un `emoji` unicode obligatoire — c'est le bulletin, donc
+deux options d'un même sondage ne peuvent pas partager le même. Un champ `icon`
+facultatif nomme un emoji du serveur à utiliser à la place ; tant qu'il n'existe
+pas, l'unicode sert de repli et le sondage reste votable.
+
+Les emojis personnalisés sont appariés **par leur nom**, pas par leur
+identifiant : réenvoyer une icône sur le serveur ne détache donc aucun vote.
 
 ## Classes et rôles
 
@@ -74,6 +118,12 @@ Les classes, leurs couleurs et les rôles qu'elles peuvent tenir sont dans
 
 Lancer `/roles-classes` **avant** `/classes`, sinon les membres déclarent leur
 classe sans recevoir la couleur correspondante.
+
+Le bot cherche une icône d'abord parmi les emojis **du serveur**, puis parmi les
+emojis **de son application**, et retombe sur l'unicode de la configuration s'il
+ne trouve rien. Une icône ajoutée à la main sur le serveur suffit donc, et
+`/emojis` devient facultative : elle sert à envoyer les icônes de `assets/` à
+l'application quand on préfère ne pas consommer les 50 emplacements du serveur.
 
 `/classes` poste **deux** messages, tenus à jour à chaque clic :
 

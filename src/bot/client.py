@@ -12,10 +12,11 @@ from bot.cogs.classes import Classes
 from bot.cogs.general import General
 from bot.cogs.polls import Polls
 from bot.emojis import EmojiStore
+from bot.reactions import ReactionVotes, reconcile
 from bot.rendering import Declaration, alternates_board_embed, main_board_embed
 from bot.tree import GuildCommandTree
 from bot.views.classes import AlternateClassButton, MainClassButton, RoleButton
-from bot.views.poll import CloseCancelButton, CloseConfirmButton, VoteButton
+from bot.views.poll import CloseCancelButton, CloseConfirmButton
 from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
 from db import ClassRepo, apply_migrations, connect
 
@@ -23,13 +24,16 @@ _log = logging.getLogger(__name__)
 
 
 def build_intents() -> discord.Intents:
-    """Minimal intents: guilds for the command tree, members for role management.
+    """Minimal intents: guilds for the command tree, members for roles, reactions for votes.
 
-    message_content is deliberately left off: the bot only uses slash commands and views.
+    guild_reactions is not a privileged intent, so it needs nothing on the developer portal.
+    message_content is deliberately left off: the bot only uses slash commands, views and
+    reactions, none of which need to read what members write.
     """
     intents = discord.Intents.none()
     intents.guilds = True
     intents.members = True
+    intents.guild_reactions = True
     return intents
 
 
@@ -47,7 +51,7 @@ class GuildBot(commands.Bot):
         # Loaded eagerly: a malformed polls.toml must fail at startup, not on a command.
         self.catalog: PollCatalog = load_catalog(settings.polls_file)
         self.classes: ClassCatalog = load_classes(settings.classes_file)
-        self.emojis_store = EmojiStore(self.classes)
+        self.emojis_store = EmojiStore(self.classes, settings.guild_id)
         self._db: aiosqlite.Connection | None = None
 
     @property
@@ -72,7 +76,6 @@ class GuildBot(commands.Bot):
         # Registered once, for every poll: discord.py rebuilds each button from the
         # custom_id stored on the message, so nothing has to be re-registered per poll.
         self.add_dynamic_items(
-            VoteButton,
             CloseConfirmButton,
             CloseCancelButton,
             MainClassButton,
@@ -83,8 +86,12 @@ class GuildBot(commands.Bot):
         await self.add_cog(General(self))
         await self.add_cog(Polls(self))
         await self.add_cog(Classes(self))
+        await self.add_cog(ReactionVotes(self))
 
         await self.emojis_store.refresh(self)
+        # Reactions added or removed while the bot was down are never replayed, so the open
+        # polls are realigned on what their messages actually show.
+        await reconcile(self)
 
         guild = self.guild_object
         self.tree.copy_global_to(guild=guild)

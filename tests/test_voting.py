@@ -1,4 +1,4 @@
-"""Vote button dispatch, staff checks and embed rendering."""
+"""Reaction dispatch, closing buttons, staff checks and embed rendering."""
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -7,24 +7,18 @@ from typing import cast
 import discord
 import pytest
 
+from bot.emojis import EmojiStore
 from bot.permissions import is_staff
+from bot.reactions import ReactionEmoji, ballot_of
 from bot.rendering import NO_VOTES, poll_embed, results_embed
 from bot.views.poll import (
     CANCEL_TEMPLATE,
     CLOSE_TEMPLATE,
-    VOTE_TEMPLATE,
     CloseCancelButton,
     CloseConfirmButton,
-    VoteButton,
     build_close_confirmation_view,
-    build_poll_view,
 )
-from config import (
-    CANCEL_CLOSE_CUSTOM_ID,
-    PollCatalog,
-    build_close_custom_id,
-    build_vote_custom_id,
-)
+from config import CANCEL_CLOSE_CUSTOM_ID, PollCatalog, build_close_custom_id
 from config.polls import PollDefinition
 from domain import OptionTally, Poll, PollOption, PollStatus
 
@@ -35,9 +29,21 @@ DEFINITION = PollDefinition.model_validate(
         "key": "faction",
         "title": "Quelle faction ?",
         "description": "Vote décisif.",
+        "multiple": True,
         "options": [
-            {"key": "alliance", "label": "Alliance", "emoji": "🔵"},
-            {"key": "horde", "label": "Horde", "emoji": "🔴"},
+            {"key": "alliance", "label": "Alliance", "emoji": "🔵", "icon": "alliance"},
+            {"key": "horde", "label": "Horde", "emoji": "🔴", "icon": "horde"},
+        ],
+    }
+)
+
+SINGLE = PollDefinition.model_validate(
+    {
+        "key": "royaume",
+        "title": "Quel type de royaume ?",
+        "options": [
+            {"key": "normal", "label": "Normal", "emoji": "🛡️"},
+            {"key": "jcj", "label": "JcJ", "emoji": "⚔️"},
         ],
     }
 )
@@ -74,46 +80,54 @@ def _tallies(*counts: int) -> list[OptionTally]:
     ]
 
 
-# --- custom_id round trip: this is what makes a restart survivable -------------------
+# --- ballot round trip: this is what makes a reaction land on the right option --------
 
 
-@pytest.mark.parametrize("poll_key,option_key", [("faction", "alliance"), ("royaume", "jcj")])
-def test_the_template_matches_a_generated_custom_id(poll_key: str, option_key: str) -> None:
-    """If these two drifted apart, buttons would go dead after a restart."""
-    match = VOTE_TEMPLATE.fullmatch(build_vote_custom_id(poll_key, option_key))
-
-    assert match is not None
-    assert match["poll"] == poll_key
-    assert match["option"] == option_key
+def test_a_unicode_reaction_reads_as_its_character() -> None:
+    assert ballot_of(discord.PartialEmoji(name="🔵")) == "🔵"
 
 
-def test_the_template_matches_every_configured_option(catalog: PollCatalog) -> None:
+def test_a_custom_reaction_reads_as_its_name() -> None:
+    """Matched by name, not by id, so re-uploading an icon keeps the votes attached."""
+    assert ballot_of(discord.PartialEmoji(name="alliance", id=123)) == "alliance"
+
+
+def test_a_reaction_given_as_a_plain_string_reads_as_itself() -> None:
+    """Message.reactions hands unicode emojis over as str rather than PartialEmoji."""
+    assert ballot_of(cast(ReactionEmoji, "🔴")) == "🔴"
+
+
+def test_every_configured_option_is_found_back_from_its_ballot(catalog: PollCatalog) -> None:
+    """The reaction equivalent of the old custom_id round trip: no option may go dead."""
     for definition in catalog.polls:
         for option in definition.options:
-            custom_id = build_vote_custom_id(definition.key, option.key)
-            assert VOTE_TEMPLATE.fullmatch(custom_id) is not None
+            assert definition.option_for_ballot(option.ballot) is option
 
 
-async def test_from_custom_id_restores_the_keys() -> None:
-    """Rebuilding the handler from the message is what a restarted bot does."""
-    custom_id = build_vote_custom_id("faction", "horde")
-    match = VOTE_TEMPLATE.fullmatch(custom_id)
-    assert match is not None
+def test_an_icon_wins_over_the_unicode_fallback_as_a_ballot() -> None:
+    alliance = DEFINITION.options[0]
 
-    interaction = cast(discord.Interaction, SimpleNamespace())
-    button = VoteButton("faction", "horde", label="Horde")
-
-    restored = await VoteButton.from_custom_id(interaction, button.item, match)
-
-    assert (restored.poll_key, restored.option_key) == ("faction", "horde")
+    assert alliance.ballot == "alliance"
+    assert DEFINITION.option_for_ballot("alliance") is alliance
 
 
-def test_the_view_is_persistent_and_carries_one_button_per_option() -> None:
-    view = build_poll_view(DEFINITION)
+def test_the_unicode_fallback_is_the_ballot_when_no_icon_is_configured() -> None:
+    assert SINGLE.options[0].ballot == "🛡"
 
-    assert view.timeout is None
-    assert [cast(VoteButton, item).option_key for item in view.children] == ["alliance", "horde"]
-    assert all(item.is_persistent() for item in view.children)
+
+@pytest.mark.parametrize("reacted", ["🛡️", "🛡"])
+def test_a_variation_selector_does_not_change_which_option_is_meant(reacted: str) -> None:
+    """Discord does not always echo U+FE0F back, so both forms must resolve."""
+    option = SINGLE.option_for_ballot(reacted)
+
+    assert option is not None
+    assert option.key == "normal"
+
+
+def test_an_emoji_nobody_offered_resolves_to_nothing() -> None:
+    """That is what tells the handler to take the reaction off the message."""
+    assert DEFINITION.option_for_ballot("🍕") is None
+    assert DEFINITION.option_for_ballot("horde_bis") is None
 
 
 # --- closing a poll ------------------------------------------------------------------
@@ -133,12 +147,10 @@ def test_the_cancel_template_matches_its_custom_id() -> None:
 
 def test_every_poll_custom_id_matches_exactly_one_template(catalog: PollCatalog) -> None:
     """Two matches would make the handler depend on registration order; none would be dead."""
-    templates = (VOTE_TEMPLATE, CLOSE_TEMPLATE, CANCEL_TEMPLATE)
+    templates = (CLOSE_TEMPLATE, CANCEL_TEMPLATE)
 
     sent = [CANCEL_CLOSE_CUSTOM_ID]
-    for definition in catalog.polls:
-        sent.append(build_close_custom_id(definition.key))
-        sent.extend(build_vote_custom_id(definition.key, o.key) for o in definition.options)
+    sent.extend(build_close_custom_id(definition.key) for definition in catalog.polls)
 
     for custom_id in sent:
         matching = [t for t in templates if t.fullmatch(custom_id) is not None]
@@ -201,8 +213,8 @@ def test_someone_with_no_role_is_not_staff() -> None:
 # --- rendering -----------------------------------------------------------------------
 
 
-def test_an_empty_poll_shows_a_placeholder_rather_than_zeroes() -> None:
-    embed = poll_embed(_poll(), DEFINITION, _tallies(0, 0))
+def test_an_empty_poll_shows_a_placeholder_rather_than_zeroes(emojis: EmojiStore) -> None:
+    embed = poll_embed(_poll(), DEFINITION, _tallies(0, 0), emojis)
 
     assert embed.description is not None
     assert NO_VOTES in embed.description
@@ -210,8 +222,8 @@ def test_an_empty_poll_shows_a_placeholder_rather_than_zeroes() -> None:
     assert embed.footer.text.startswith("0 vote ")
 
 
-def test_counts_and_shares_are_rendered() -> None:
-    embed = poll_embed(_poll(), DEFINITION, _tallies(3, 1))
+def test_counts_and_shares_are_rendered(emojis: EmojiStore) -> None:
+    embed = poll_embed(_poll(), DEFINITION, _tallies(3, 1), emojis)
 
     assert embed.description is not None
     assert "**Alliance** — 3 (75 %)" in embed.description
@@ -220,21 +232,43 @@ def test_counts_and_shares_are_rendered() -> None:
     assert embed.footer.text.startswith("4 votes ")
 
 
-def test_a_closed_poll_says_so() -> None:
-    embed = poll_embed(_poll(PollStatus.CLOSED), DEFINITION, _tallies(1, 0))
+def test_a_missing_icon_falls_back_to_the_unicode_emoji(emojis: EmojiStore) -> None:
+    """The store fetched nothing here, which is the state before the icons are uploaded."""
+    embed = poll_embed(_poll(), DEFINITION, _tallies(1, 0), emojis)
+
+    assert embed.description is not None
+    assert "🔵 **Alliance**" in embed.description
+
+
+def test_a_poll_accepting_several_answers_says_so(emojis: EmojiStore) -> None:
+    embed = poll_embed(_poll(), DEFINITION, _tallies(1, 1), emojis)
+
+    assert embed.footer.text is not None
+    assert "plusieurs choix" in embed.footer.text
+
+
+def test_a_single_answer_poll_says_so_instead(emojis: EmojiStore) -> None:
+    embed = poll_embed(_poll(), SINGLE, _tallies(1, 1), emojis)
+
+    assert embed.footer.text is not None
+    assert "un seul choix" in embed.footer.text
+
+
+def test_a_closed_poll_says_so(emojis: EmojiStore) -> None:
+    embed = poll_embed(_poll(PollStatus.CLOSED), DEFINITION, _tallies(1, 0), emojis)
 
     assert embed.footer.text is not None
     assert "clos" in embed.footer.text
 
 
-def test_results_are_ranked_by_vote_count() -> None:
-    embed = results_embed(_poll(), DEFINITION, _tallies(1, 5))
+def test_results_are_ranked_by_vote_count(emojis: EmojiStore) -> None:
+    embed = results_embed(_poll(), DEFINITION, _tallies(1, 5), emojis)
 
     assert embed.description is not None
     assert embed.description.index("Horde") < embed.description.index("Alliance")
 
 
-def test_a_poll_embed_stays_within_the_api_limits() -> None:
-    embed = poll_embed(_poll(), DEFINITION, _tallies(3, 1))
+def test_a_poll_embed_stays_within_the_api_limits(emojis: EmojiStore) -> None:
+    embed = poll_embed(_poll(), DEFINITION, _tallies(3, 1), emojis)
 
     assert len(embed) <= 6000

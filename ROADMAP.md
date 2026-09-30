@@ -9,7 +9,11 @@ Chaque étape se termine par : test manuel réussi, puis commit, puis rendu d'ex
 sondages structurants peuvent donc être clos dès que tu as tranché ; l'échéance
 du 25 octobre n'est plus bloquée par le code.
 
-**Prochaine étape : la 5**, le sondage du nom de guilde. Elle amène les modales,
+L'**étape 4ter** est écrite mais **pas encore testée sur le serveur** : le vote
+passe des boutons aux réactions. Son scénario de recette est en bas de ce
+fichier, à dérouler avant de commiter.
+
+**Ensuite : l'étape 5**, le sondage du nom de guilde. Elle amène les modales,
 sur lesquelles se greffera la commande de création de sondage à la volée.
 
 L'étape 4 a été remaniée le 30 septembre, après un premier jet : deux messages
@@ -68,7 +72,11 @@ serveur, le bot ne peut pas s'en charger :
 - Le rôle du bot est au-dessus des rôles de classe, donc il peut les attribuer.
   Il reste **sous** Membre, Officier et Maître de guilde, qu'il ne peut donc pas
   attribuer. Sans conséquence aujourd'hui.
-- Aucun emoji d'application n'est encore envoyé.
+- Les 14 icônes sont des **emojis du serveur**, posées à la main : les 9 classes,
+  les 3 rôles, plus `alliance` et `horde`. Aucun emoji d'application n'est envoyé,
+  et `/emojis` n'a donc plus rien à faire — le bot lit le serveur en premier.
+- Le bot a besoin de « Gérer les messages » dans le salon des sondages pour
+  retirer les réactions hors menu. `/sondage` refuse de poster sans elle.
 
 ### Manques connus, dans aucune étape
 
@@ -77,16 +85,25 @@ serveur, le bot ne peut pas s'en charger :
 - **Aucune commande d'officier n'efface les choix de quelqu'un d'autre.** Chacun
   défait les siens en recliquant. `ClassRepo.clear_choices()` est écrite et
   testée : il ne manque que la commande qui l'appelle, si le besoin se présente.
+- **Un vote par réaction est silencieux.** Une réaction ne passe pas par une
+  interaction, donc rien ne peut être répondu au votant, pas même un éphémère.
+  Le compteur du message est le seul accusé de réception. Accepté en l'état.
+- **Pas d'anti-rebond sur la réécriture du message.** Chaque réaction déclenche
+  une édition, et Discord en limite environ 5 par 5 secondes par salon. À trente
+  votants dans la même minute l'affichage prendra du retard, sans rien perdre en
+  base. À traiter si ça se produit vraiment, pas avant.
 
 ## Contrainte de calendrier
 
 - Bêta WoW Forever : jusqu'au 21 octobre 2026
 - Réservation des noms : 27 octobre – 3 novembre
+- Création des personnages : à partir du 27 octobre
 - Sortie : 4 novembre
 
 Les sondages Faction, Type de royaume et Nom de guilde doivent être
-clos avant le 25 octobre : on ne peut pas réserver un nom sans avoir
-tranché la faction et le royaume.
+clos avant le 25 octobre. La faction ne conditionne pas la réservation du
+nom mais la création des personnages, qui ouvre le 27 octobre : tout le
+monde doit créer du même côté.
 Les étapes 1 à 5 sont donc prioritaires. L'étape 6 peut attendre la sortie.
 
 ## Questions ouvertes
@@ -96,8 +113,7 @@ Les étapes 1 à 5 sont donc prioritaires. L'étape 6 peut attendre la sortie.
 ## Décisions prises
 
 - **Création de sondages depuis Discord** : approche mixte retenue. `polls.toml`
-  reste la source des sondages structurants d'avant-lancement (faction, royaume,
-  Skyborne), dont les clés sont inscrites en base et dans les boutons. Une
+  reste la source des sondages structurants d'avant-lancement (faction, royaume), dont les clés sont inscrites en base et dans les boutons. Une
   commande de création à la volée, pour les sondages ponctuels d'après-sortie,
   sera greffée sur l'étape 5 qui amène déjà les modales. Ne rien figer d'ici là
   qui empêcherait un sondage défini en base plutôt qu'en fichier.
@@ -143,6 +159,10 @@ Les trois sondages à choix limité, sans propositions ni combos.
 - [x] Sondages : faction, type de royaume, pack Skyborne
 
 Fini quand : le bot redémarre en plein sondage et les boutons fonctionnent encore.
+
+**Remanié par l'étape 4ter** : les boutons de vote ont disparu au profit des
+réactions, et « un vote par personne » est devenu configurable. Les deux lignes
+ci-dessus décrivent l'état livré à l'époque, pas le code actuel.
 
 ## Étape 4 — Déclaration de classe et de rôle
 
@@ -278,14 +298,94 @@ L'étape 10 vérifie la persistance des boutons de confirmation.
 Reste ouvert : un sondage clos par erreur ne se rouvre qu'en base. C'était le
 choix retenu, la confirmation servant de garde-fou.
 
+**Ce scénario date des boutons de vote.** Les étapes 2, 5 et 9 ne se déroulent
+plus tout à fait pareil depuis l'étape 4ter : on vote en réagissant, la clôture
+retire les réactions au lieu des boutons, et `handle_vote` n'existe plus — c'est
+le gestionnaire de réactions qui écarte un vote sur un sondage clos. Les étapes
+1, 3, 4, 6, 7, 8 et 10 restent valables telles quelles ; le scénario de l'étape
+4ter couvre le reste.
+
+## Étape 4ter — Vote par réaction
+
+Hors feuille de route initiale, ajoutée le 30 septembre. Les icônes Alliance et
+Horde ayant été posées en emojis du serveur, elles deviennent les bulletins
+eux-mêmes : on ne clique plus un bouton, on réagit sous le message. Les trois
+sondages basculent, et « Peu importe » disparaît de Faction — réagir avec les
+deux emojis dit exactement la même chose, en mieux.
+
+Ce que ça change, au-delà de l'apparence :
+
+- **Un vote par personne n'est plus une garantie de schéma.** La clé primaire
+  `(poll_id, member_id)` ne pouvait pas représenter deux réactions du même
+  membre. Migration 003, reconstruction en `(poll_id, member_id, option_id)`,
+  et le choix unique se fait désormais dans le repository, par sondage.
+- **Discord ne rejoue jamais un événement de réaction.** Un clic sur un bouton
+  échouait visiblement quand le bot était éteint ; une réaction, elle, s'ajoute
+  très bien sans lui et reste invisible pour toujours. D'où la réconciliation au
+  démarrage, qui relit les réactions et réaligne la base. Le message fait foi.
+- **Rien ne peut être répondu au votant.** Pas d'interaction, donc pas
+  d'éphémère : le compteur est le seul retour.
+- **Un message plafonne à 20 réactions distinctes**, contre 25 boutons.
+
+- [x] `emoji` obligatoire par option, `icon` facultatif nommant un emoji du serveur
+- [x] Deux options d'un même sondage ne peuvent pas partager un emoji
+- [x] `multiple` par sondage ; activé sur Faction seul
+- [x] Migration 003 : plusieurs votes par membre, anciens votes conservés
+- [x] `EmojiStore` lit le serveur, puis l'application, puis l'unicode
+- [x] Intent `guild_reactions`, non privilégié
+- [x] `/sondage` pose les bulletins et vérifie les cinq permissions nécessaires
+- [x] Réaction hors menu ou sur sondage clos : retirée
+- [x] Choix unique : réagir ailleurs déplace le vote et retire l'ancienne réaction
+- [x] Réconciliation au démarrage sur les réactions réellement présentes
+- [x] `/clore` retire les réactions au lieu des boutons
+- [x] `/sondage` refuse de réafficher un sondage déjà voté et encore affiché
+- [ ] **Recette sur le serveur** — voir le scénario ci-dessous
+
+Fini quand : réagir 🔵 sous Faction incrémente Alliance, réagir 🔴 en plus
+incrémente Horde sans retirer Alliance, et un redémarrage retrouve les deux.
+
+### Scénario de recette — à dérouler
+
+Le bot a besoin de « Gérer les messages » dans le salon avant de commencer.
+
+| #  | Action | Attendu |
+|----|--------|---------|
+| 1  | `/sondage clé:faction` | Message posté, **deux** réactions déjà en place : les icônes Alliance et Horde, pas les pastilles |
+| 2  | Réagir 🔵 | Alliance passe à 1. **Aucun message** ne répond, c'est normal |
+| 3  | Réagir 🔴 en plus | Horde passe à 1 **et Alliance reste à 1** : le multi-vote marche |
+| 4  | Retirer 🔵 | Alliance retombe à 0, Horde reste à 1 |
+| 5  | Réagir 🍕 | La réaction est retirée par le bot, les compteurs ne bougent pas |
+| 6  | `/sondage clé:royaume`, réagir 🛡️ | Normal à 1 |
+| 7  | Réagir ⚔️ sur le même sondage | JcJ à 1, Normal à 0, **et la réaction 🛡️ disparaît** : choix unique |
+| 8  | `Ctrl-C`, réagir 🎭 pendant l'arrêt, relancer | Au démarrage, Roleplay est à 1 et JcJ à 0 : la réconciliation a vu la réaction posée hors ligne |
+| 9  | `/sondage clé:faction` | **Refusé** : déjà affiché et déjà voté |
+| 10 | `/resultats clé:faction` | Compteurs cohérents avec les réactions du message |
+| 11 | `/clore clé:faction` → confirmer | Message en gris, « Sondage clos. », **plus aucune réaction** |
+| 12 | Réagir 🔵 sur le sondage clos | La réaction est retirée, le compteur ne bouge pas |
+| 13 | Supprimer le message de royaume, `/sondage clé:royaume` | Accepté : il n'y a plus rien à perdre |
+
+L'étape 8 est la décisive : c'est elle qui vérifie la réconciliation, et elle
+n'a pas d'équivalent du temps des boutons.
+
+Les étapes 3 et 7 opposent les deux modes de vote sur deux sondages différents.
+L'étape 9 vérifie le garde-fou du réaffichage, l'étape 13 qu'il ne bloque pas
+une reprise légitime.
+
 ## Étape 5 — Sondage nom de guilde
 
 Vote ouvert avec propositions des membres.
+
+**Le vote par réaction ne convient pas à cette étape** : un message plafonne à
+20 réactions distinctes, et un nom proposé par un membre n'a pas d'emoji à lui.
+Il faudra donc réintroduire un vote à boutons ou à menu déroulant pour ce
+sondage-là, à côté des réactions que gardent les trois autres. La couche base et
+`/clore` ne bougent pas, seul l'affichage du vote change.
 
 - [ ] Bouton « Proposer un nom » ouvrant une modale
 - [ ] Validation : longueur, doublons, caractères autorisés
 - [ ] Limite de propositions par personne
 - [ ] Vote sur toutes les options, y compris ajoutées
+- [ ] Réintroduire un vote à boutons ou menu, propre à ce sondage
 - [ ] Gestion du dépassement de 25 options (pagination ou tri)
 - [ ] Un officier peut supprimer une proposition
 

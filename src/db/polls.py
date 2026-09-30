@@ -94,6 +94,15 @@ class PollRepo:
 
         return _to_poll(row) if row is not None else None
 
+    async def get_by_message(self, message_id: int) -> Poll | None:
+        """Fetch the poll a message displays. How a reaction finds its poll."""
+        async with self._db.execute(
+            "SELECT * FROM polls WHERE message_id = ?", (message_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        return _to_poll(row) if row is not None else None
+
     async def list_open(self) -> list[Poll]:
         """Every poll still accepting votes, oldest first."""
         async with self._db.execute(
@@ -172,18 +181,17 @@ class PollRepo:
         await self._db.commit()
         return _to_poll(row) if row is not None else None
 
-    async def cast_vote(self, poll_id: int, member_id: int, option_id: int) -> PollVote:
-        """Record a vote, replacing the member's previous choice on this poll.
+    async def add_vote(self, poll_id: int, member_id: int, option_id: int) -> PollVote:
+        """Back one option, leaving the member's other choices on this poll alone.
 
-        The primary key on (poll_id, member_id) makes one-vote-per-person a schema guarantee,
-        so changing your mind is an upsert rather than a delete plus an insert.
+        Used by the polls that allow several answers. Backing the same option twice only
+        refreshes its timestamp, so replaying a reaction event is harmless.
         """
         async with self._db.execute(
             """
             INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT (poll_id, member_id) DO UPDATE SET
-                option_id = excluded.option_id,
+            ON CONFLICT (poll_id, member_id, option_id) DO UPDATE SET
                 voted_at = excluded.voted_at
             RETURNING *
             """,
@@ -197,15 +205,83 @@ class PollRepo:
         await self._db.commit()
         return _to_vote(row)
 
-    async def vote_of(self, poll_id: int, member_id: int) -> PollVote | None:
-        """The member's current choice on this poll, if they voted."""
+    async def remove_vote(self, poll_id: int, member_id: int, option_id: int) -> bool:
+        """Take one option back. Returns whether there was anything to remove."""
         async with self._db.execute(
-            "SELECT * FROM poll_votes WHERE poll_id = ? AND member_id = ?",
+            "DELETE FROM poll_votes WHERE poll_id = ? AND member_id = ? AND option_id = ?",
+            (poll_id, member_id, option_id),
+        ) as cursor:
+            removed = cursor.rowcount > 0
+
+        await self._db.commit()
+        return removed
+
+    async def cast_vote(self, poll_id: int, member_id: int, option_id: int) -> PollVote:
+        """Back one option and drop every other choice the member had on this poll.
+
+        Used by the polls that allow a single answer. Since the schema now permits several
+        rows per member, one-vote-per-person is enforced here rather than by the primary key.
+        """
+        await self._db.execute("BEGIN")
+        try:
+            await self._db.execute(
+                "DELETE FROM poll_votes WHERE poll_id = ? AND member_id = ? AND option_id <> ?",
+                (poll_id, member_id, option_id),
+            )
+            async with self._db.execute(
+                """
+                INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (poll_id, member_id, option_id) DO UPDATE SET
+                    voted_at = excluded.voted_at
+                RETURNING *
+                """,
+                (poll_id, member_id, option_id, to_iso(utcnow())),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row is None:  # pragma: no cover -- RETURNING always yields a row on success
+                raise RuntimeError(f"Vote of member {member_id} returned no row")
+        except Exception:
+            await self._db.rollback()
+            raise
+
+        await self._db.commit()
+        return _to_vote(row)
+
+    async def votes_of(self, poll_id: int, member_id: int) -> list[PollVote]:
+        """Every option this member backs on this poll, oldest first."""
+        async with self._db.execute(
+            "SELECT * FROM poll_votes WHERE poll_id = ? AND member_id = ? ORDER BY voted_at",
             (poll_id, member_id),
         ) as cursor:
-            row = await cursor.fetchone()
+            return [_to_vote(row) for row in await cursor.fetchall()]
 
-        return _to_vote(row) if row is not None else None
+    async def sync_votes(self, poll_id: int, pairs: Sequence[tuple[int, int]]) -> int:
+        """Replace every vote of a poll with the given (member_id, option_id) pairs.
+
+        Reactions added or removed while the bot was offline are never replayed by Discord,
+        so what the message shows is the only truth on restart. Returns how many votes the
+        poll holds afterwards.
+        """
+        now = to_iso(utcnow())
+
+        await self._db.execute("BEGIN")
+        try:
+            await self._db.execute("DELETE FROM poll_votes WHERE poll_id = ?", (poll_id,))
+            await self._db.executemany(
+                """
+                INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(poll_id, member_id, option_id, now) for member_id, option_id in pairs],
+            )
+        except Exception:
+            await self._db.rollback()
+            raise
+
+        await self._db.commit()
+        return len(pairs)
 
     async def results(self, poll_id: int) -> list[OptionTally]:
         """Vote count per option, in display order, including options nobody picked."""

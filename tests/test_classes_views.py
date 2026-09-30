@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from typing import cast
 
 import discord
-import pytest
 
 from bot.emojis import EmojiStore
 from bot.rendering import (
@@ -40,12 +39,6 @@ EMBED_FIELD_LIMIT = 1024
 COMPONENTS_PER_MESSAGE = 25
 
 TANK, HEAL, DPS = 0, 1, 2
-
-
-@pytest.fixture
-def emojis(classes: ClassCatalog) -> EmojiStore:
-    """An empty store: nothing uploaded, so the unicode fallbacks are used."""
-    return EmojiStore(classes)
 
 
 def _choice(member_id: int, rank: int, class_key: str, role_key: str) -> MemberChoice:

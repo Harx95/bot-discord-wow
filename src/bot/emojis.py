@@ -1,8 +1,13 @@
-"""Application emojis for class and role icons.
+"""Custom emojis for class, role and poll icons.
 
-Icons are uploaded to the bot's application rather than to the guild: they cost none of
-the 50 emoji slots a server has, and they work in every server the bot is invited to.
-Until an icon is uploaded, the unicode fallback from classes.toml is used instead.
+Two sources, looked up in this order:
+
+- the guild's own emojis, which is where the icons were put by hand;
+- the bot's application emojis, which /emojis uploads and which cost none of the 50 slots
+  a server has.
+
+The unicode fallback from classes.toml or polls.toml is used until one of the two holds
+the icon, so a missing image degrades the display and never breaks a command.
 """
 
 import logging
@@ -10,7 +15,7 @@ from pathlib import Path
 
 import discord
 
-from config import ClassCatalog, emoji_name
+from config import ClassCatalog, OptionDefinition, emoji_name
 from config.classes import EMOJI_CLASS_PREFIX, EMOJI_ROLE_PREFIX
 
 _log = logging.getLogger(__name__)
@@ -24,26 +29,52 @@ MISSING_FILE = "aucune image trouvée"
 
 
 class EmojiStore:
-    """The application emojis, fetched once at startup and kept by name."""
+    """The custom emojis the bot can use, fetched once at startup and kept by name."""
 
-    def __init__(self, catalog: ClassCatalog) -> None:
+    def __init__(self, catalog: ClassCatalog, guild_id: int) -> None:
         self._catalog = catalog
-        self._by_name: dict[str, discord.Emoji] = {}
+        self._guild_id = guild_id
+        self._guild: dict[str, discord.Emoji] = {}
+        self._application: dict[str, discord.Emoji] = {}
 
     async def refresh(self, client: discord.Client) -> None:
-        """Re-read the emojis the application holds."""
+        """Re-read both sources. A source that fails leaves the other one usable."""
+        self._guild = await self._fetch_guild_emojis(client)
+        self._application = await self._fetch_application_emojis(client)
+        _log.info(
+            "Loaded %d guild emoji(s) and %d application emoji(s)",
+            len(self._guild),
+            len(self._application),
+        )
+
+    async def _fetch_guild_emojis(self, client: discord.Client) -> dict[str, discord.Emoji]:
+        """The guild's emojis, over HTTP.
+
+        Fetched rather than read from the cache: refresh runs in setup_hook, before the
+        guild cache is populated, and fetching needs no extra intent.
+        """
+        try:
+            guild = await client.fetch_guild(self._guild_id)
+            emojis = await guild.fetch_emojis()
+        except discord.HTTPException as error:
+            _log.warning("Could not fetch the guild emojis: %s", error)
+            return {}
+
+        return {emoji.name: emoji for emoji in emojis}
+
+    async def _fetch_application_emojis(self, client: discord.Client) -> dict[str, discord.Emoji]:
+        """The emojis /emojis uploaded to the application."""
         try:
             emojis = await client.fetch_application_emojis()
         except discord.HTTPException as error:
-            _log.warning("Could not fetch application emojis: %s", error)
-            return
+            _log.warning("Could not fetch the application emojis: %s", error)
+            return {}
 
-        self._by_name = {emoji.name: emoji for emoji in emojis}
-        _log.info("Loaded %d application emoji(s)", len(self._by_name))
+        return {emoji.name: emoji for emoji in emojis}
 
     def get(self, name: str) -> discord.Emoji | None:
-        """The uploaded emoji of that name, if there is one."""
-        return self._by_name.get(name)
+        """The emoji of that name, the guild's taking precedence over the application's."""
+        return self._guild.get(name) or self._application.get(name)
 
     def for_class(self, class_key: str) -> discord.Emoji | str | None:
         """Icon of a class: the uploaded one, else the configured fallback."""
@@ -60,6 +91,20 @@ class EmojiStore:
             return uploaded
         role = self._catalog.role(role_key)
         return role.emoji if role is not None else None
+
+    def for_option(self, option: OptionDefinition) -> discord.Emoji | str:
+        """The ballot of a poll option: the custom icon, else the configured unicode emoji.
+
+        Never None: an option always has a unicode emoji, so a poll can always be voted on
+        even when its icons are missing from the server.
+        """
+        if option.icon is None:
+            return option.emoji
+        return self.get(option.icon) or option.emoji
+
+    def rendered_option(self, option: OptionDefinition) -> str:
+        """Ballot of a poll option as it appears inside an embed."""
+        return _rendered(self.for_option(option))
 
     def rendered_class(self, class_key: str) -> str:
         """Icon of a class as it appears inside an embed, or an empty string."""

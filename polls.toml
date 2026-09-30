@@ -2,20 +2,28 @@
 #
 # key       stable identifier, used by /sondage and stored in the database.
 #           Changing it after a poll has opened orphans the existing votes.
-# label     shown on the button, 80 characters maximum.
-# emoji     optional, displayed before the label.
+# label     shown beside the count, 80 characters maximum.
+# emoji     required: votes are cast by reacting, so the emoji is the ballot.
+#           Two options of the same poll may never share one. 20 options at most.
+# icon      optional name of a server emoji, used instead of the unicode one.
+#           Until it exists on the server, the emoji above is used.
+# multiple  lets one member back several options at once. Off by default.
 
 [[polls]]
 key = "faction"
 title = "Quelle faction ?"
 description = """
-Vote décisif : la faction conditionne la réservation du nom de guilde, \
-du 27 octobre au 3 novembre. Clôture avant le 25 octobre.
+Vote décisif : on crée tous nos personnages du même côté, et la création ouvre \
+le 27 octobre. Les 9 classes sont disponibles dans les deux factions, ce choix \
+n'engage donc pas le tien.
+
+Réagis avec l'emoji de ta faction. Les deux te vont ? Réagis avec les deux. \
+Clôture avant le 25 octobre.
 """
+multiple = true
 options = [
-    { key = "alliance", label = "Alliance", emoji = "🔵" },
-    { key = "horde", label = "Horde", emoji = "🔴" },
-    { key = "peu_importe", label = "Peu importe", emoji = "🤷" },
+    { key = "alliance", label = "Alliance", emoji = "🔵", icon = "alliance" },
+    { key = "horde", label = "Horde", emoji = "🔴", icon = "horde" },
 ]
 
 [[polls]]

@@ -102,13 +102,14 @@ async def test_cast_vote_records_a_choice(members: MemberRepo, polls: PollRepo) 
     vote = await polls.cast_vote(poll.id, 1, alliance.id)
 
     assert vote.option_id == alliance.id
-    assert await polls.vote_of(poll.id, 1) == vote
+    assert await polls.votes_of(poll.id, 1) == [vote]
 
 
 async def test_voting_again_replaces_the_previous_choice(
     members: MemberRepo,
     polls: PollRepo,
 ) -> None:
+    """Single-answer polls are enforced here now that the schema allows several rows."""
     await members.upsert(1, "Kaeldin")
     poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
     alliance, horde = await polls.options(poll.id)
@@ -116,10 +117,115 @@ async def test_voting_again_replaces_the_previous_choice(
     await polls.cast_vote(poll.id, 1, alliance.id)
     await polls.cast_vote(poll.id, 1, horde.id)
 
-    current = await polls.vote_of(poll.id, 1)
-    assert current is not None
-    assert current.option_id == horde.id
+    current = await polls.votes_of(poll.id, 1)
+    assert [vote.option_id for vote in current] == [horde.id]
     assert sum(tally.votes for tally in await polls.results(poll.id)) == 1
+
+
+async def test_add_vote_keeps_the_other_choices(members: MemberRepo, polls: PollRepo) -> None:
+    """Backing both factions is the replacement for the old "Peu importe" option."""
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance, horde = await polls.options(poll.id)
+
+    await polls.add_vote(poll.id, 1, alliance.id)
+    await polls.add_vote(poll.id, 1, horde.id)
+
+    backed = {vote.option_id for vote in await polls.votes_of(poll.id, 1)}
+    assert backed == {alliance.id, horde.id}
+    assert sum(tally.votes for tally in await polls.results(poll.id)) == 2
+
+
+async def test_backing_the_same_option_twice_is_harmless(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """A reaction event can be replayed; it must not double a count."""
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance = (await polls.options(poll.id))[0]
+
+    await polls.add_vote(poll.id, 1, alliance.id)
+    await polls.add_vote(poll.id, 1, alliance.id)
+
+    assert len(await polls.votes_of(poll.id, 1)) == 1
+
+
+async def test_remove_vote_takes_back_one_option_only(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance, horde = await polls.options(poll.id)
+    await polls.add_vote(poll.id, 1, alliance.id)
+    await polls.add_vote(poll.id, 1, horde.id)
+
+    assert await polls.remove_vote(poll.id, 1, alliance.id)
+
+    assert [vote.option_id for vote in await polls.votes_of(poll.id, 1)] == [horde.id]
+
+
+async def test_removing_a_vote_that_is_not_there_says_so(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """cast_vote already dropped it when the bot takes the matching reaction off."""
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance = (await polls.options(poll.id))[0]
+
+    assert not await polls.remove_vote(poll.id, 1, alliance.id)
+
+
+async def test_sync_votes_realigns_a_poll_on_what_it_is_given(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """What the startup reconciliation does with the reactions read off the message."""
+    await members.upsert(1, "Kaeldin")
+    await members.upsert(2, "Sylvara")
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance, horde = await polls.options(poll.id)
+    await polls.add_vote(poll.id, 1, alliance.id)
+
+    total = await polls.sync_votes(poll.id, [(1, horde.id), (2, horde.id)])
+
+    assert total == 2
+    assert [vote.option_id for vote in await polls.votes_of(poll.id, 1)] == [horde.id]
+    counts = {tally.option.key: tally.votes for tally in await polls.results(poll.id)}
+    assert counts == {"alliance": 0, "horde": 2}
+
+
+async def test_sync_votes_on_an_empty_ballot_clears_the_poll(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance = (await polls.options(poll.id))[0]
+    await polls.add_vote(poll.id, 1, alliance.id)
+
+    assert await polls.sync_votes(poll.id, []) == 0
+    assert await polls.votes_of(poll.id, 1) == []
+
+
+async def test_get_by_message_finds_the_poll_a_reaction_lands_on(polls: PollRepo) -> None:
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    await polls.attach_message(poll.id, channel_id=10, message_id=20)
+
+    found = await polls.get_by_message(20)
+
+    assert found is not None
+    assert found.key == "faction"
+
+
+async def test_get_by_message_ignores_a_message_no_poll_points_at(polls: PollRepo) -> None:
+    """A reaction on an older, reposted message must simply be ignored."""
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    await polls.attach_message(poll.id, channel_id=10, message_id=20)
+
+    assert await polls.get_by_message(19) is None
 
 
 async def test_a_vote_cannot_point_at_another_polls_option(
@@ -144,10 +250,10 @@ async def test_a_vote_requires_a_known_member(polls: PollRepo) -> None:
         await polls.cast_vote(poll.id, 999, alliance.id)
 
 
-async def test_vote_of_returns_none_when_the_member_has_not_voted(polls: PollRepo) -> None:
+async def test_votes_of_is_empty_when_the_member_has_not_voted(polls: PollRepo) -> None:
     poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
 
-    assert await polls.vote_of(poll.id, 1) is None
+    assert await polls.votes_of(poll.id, 1) == []
 
 
 async def test_results_count_votes_and_keep_empty_options(
