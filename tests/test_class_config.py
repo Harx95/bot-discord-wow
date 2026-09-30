@@ -3,8 +3,12 @@
 import pytest
 from pydantic import ValidationError
 
-from config import ClassCatalog
-from config.classes import ClassDefinition, build_role_button_custom_id
+from config import ClassCatalog, Slot
+from config.classes import (
+    ClassDefinition,
+    build_class_button_custom_id,
+    build_role_button_custom_id,
+)
 from config.polls import CUSTOM_ID_LIMIT
 
 EXPECTED_CLASSES = 9
@@ -100,8 +104,8 @@ def test_duplicate_class_keys_are_rejected() -> None:
         ClassCatalog.model_validate(_catalog(classes=twice))
 
 
-def test_more_classes_than_a_select_menu_holds_is_rejected() -> None:
-    """A class menu is a single select: 25 options maximum."""
+def test_more_classes_than_a_board_message_holds_is_rejected() -> None:
+    """One button per class on a board message: 25 components maximum."""
     many = [
         {"key": f"c{i}", "name": f"Classe {i}", "colour": "#FFFFFF", "roles": ["dps"]}
         for i in range(26)
@@ -111,10 +115,25 @@ def test_more_classes_than_a_select_menu_holds_is_rejected() -> None:
 
 
 def test_every_custom_id_fits_within_the_api_limit(classes: ClassCatalog) -> None:
-    for klass in classes.classes:
-        for role in classes.roles_of(klass.key):
-            custom_id = build_role_button_custom_id(klass.key, role.key)
-            assert len(custom_id) <= CUSTOM_ID_LIMIT
+    for slot in Slot:
+        for klass in classes.classes:
+            assert len(build_class_button_custom_id(slot, klass.key)) <= CUSTOM_ID_LIMIT
+            for role in classes.roles_of(klass.key):
+                custom_id = build_role_button_custom_id(slot, klass.key, role.key)
+                assert len(custom_id) <= CUSTOM_ID_LIMIT
+
+
+def test_the_two_slots_produce_different_custom_ids() -> None:
+    """Otherwise a click on one board would be handled as a click on the other."""
+    main = build_class_button_custom_id(Slot.MAIN, "mage")
+    alternate = build_class_button_custom_id(Slot.ALTERNATE, "mage")
+
+    assert main != alternate
+
+
+def test_max_alternates_leaves_room_for_the_main_character(classes: ClassCatalog) -> None:
+    assert classes.max_alternates == classes.max_choices - 1
+    assert classes.max_alternates == 2
 
 
 def test_max_choices_defaults_to_three(classes: ClassCatalog) -> None:
@@ -135,7 +154,8 @@ def test_icon_names_are_derived_from_the_keys(classes: ClassCatalog) -> None:
     assert classes.roles[0].icon_name == "role_tank"
 
 
-@pytest.mark.parametrize("value", [0, 6])
+@pytest.mark.parametrize("value", [0, 1, 6])
 def test_max_choices_outside_the_allowed_range_is_rejected(value: int) -> None:
+    """One is refused too: the alternates board would have nothing to hold."""
     with pytest.raises(ValidationError):
         ClassCatalog.model_validate(_catalog(max_choices=value))

@@ -3,7 +3,12 @@
 import aiosqlite
 
 from db.timestamps import from_iso, to_iso, utcnow
-from domain import FIRST_CHOICE, ClassRole, ManagedMessage, MemberChoice
+from domain import FIRST_CHOICE, ClassRole, MainUpdate, ManagedMessage, MemberChoice
+
+INSERT_CHOICE = """
+INSERT INTO member_choices (member_id, rank, class_key, role_key, created_at)
+VALUES (?, ?, ?, ?, ?)
+"""
 
 
 def _to_choice(row: aiosqlite.Row) -> MemberChoice:
@@ -37,25 +42,23 @@ def _to_managed_message(row: aiosqlite.Row) -> ManagedMessage:
 
 
 class ClassRepo:
-    """Read and write ranked choices, class roles and the messages showing them."""
+    """Read and write ranked choices, class roles and the messages showing them.
+
+    Rank 1 is the main character, the only one earning a Discord role. Ranks 2 and above
+    are the alternates, which the second board shows without their rank: removing one
+    leaves a hole in the sequence, and that is deliberate.
+    """
 
     def __init__(self, connection: aiosqlite.Connection) -> None:
         self._db = connection
 
     # --- ranked choices ---------------------------------------------------------------
 
-    async def append_choice(
-        self,
-        member_id: int,
-        class_key: str,
-        role_key: str,
-        max_choices: int,
-    ) -> MemberChoice | None:
-        """Add a choice at the next free rank.
+    async def set_main(self, member_id: int, class_key: str, role_key: str) -> MainUpdate:
+        """Declare the member's main character, replacing whatever held rank 1.
 
-        Returns None when the member already used every rank, so the caller can tell them
-        to start over rather than silently dropping the choice. Re-picking a pair they
-        already declared moves nothing and returns the existing entry.
+        A pair already listed as an alternate is promoted rather than duplicated: the
+        UNIQUE constraint on (member, class, role) forbids holding it twice.
         """
         await self._db.execute("BEGIN")
         try:
@@ -64,35 +67,153 @@ class ClassRepo:
                 "AND role_key = ?",
                 (member_id, class_key, role_key),
             ) as cursor:
-                existing = await cursor.fetchone()
+                same_pair = await cursor.fetchone()
 
-            if existing is not None:
+            if same_pair is not None and same_pair["rank"] == FIRST_CHOICE:
                 await self._db.commit()
-                return _to_choice(existing)
+                return MainUpdate(
+                    choice=_to_choice(same_pair),
+                    changed=False,
+                    promoted=False,
+                    replaced_class_key=None,
+                )
 
             async with self._db.execute(
-                "SELECT COUNT(*) AS taken FROM member_choices WHERE member_id = ?",
-                (member_id,),
+                "SELECT * FROM member_choices WHERE member_id = ? AND rank = ?",
+                (member_id, FIRST_CHOICE),
             ) as cursor:
-                count_row = await cursor.fetchone()
+                previous = await cursor.fetchone()
 
-            taken = count_row["taken"] if count_row is not None else 0
-            if taken >= max_choices:
-                await self._db.commit()
-                return None
+            promoted = same_pair is not None
+            if same_pair is not None:
+                # Frees the UNIQUE pair so it can be reinserted at rank 1.
+                await self._db.execute(
+                    "DELETE FROM member_choices WHERE member_id = ? AND rank = ?",
+                    (member_id, same_pair["rank"]),
+                )
+            if previous is not None:
+                await self._db.execute(
+                    "DELETE FROM member_choices WHERE member_id = ? AND rank = ?",
+                    (member_id, FIRST_CHOICE),
+                )
 
             async with self._db.execute(
-                """
-                INSERT INTO member_choices (member_id, rank, class_key, role_key, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                RETURNING *
-                """,
-                (member_id, taken + 1, class_key, role_key, to_iso(utcnow())),
+                f"{INSERT_CHOICE} RETURNING *",
+                (member_id, FIRST_CHOICE, class_key, role_key, to_iso(utcnow())),
             ) as cursor:
                 row = await cursor.fetchone()
 
             if row is None:  # pragma: no cover -- RETURNING always yields a row on success
-                raise RuntimeError(f"Choice of member {member_id} returned no row")
+                raise RuntimeError(f"Main of member {member_id} returned no row")
+        except Exception:
+            await self._db.rollback()
+            raise
+
+        await self._db.commit()
+        replaced = previous["class_key"] if previous is not None else None
+        return MainUpdate(
+            choice=_to_choice(row),
+            changed=True,
+            promoted=promoted,
+            replaced_class_key=replaced,
+        )
+
+    async def clear_main(self, member_id: int) -> MemberChoice | None:
+        """Drop the main character. Returns what was removed, or None if there was none.
+
+        Clicking the class that is already the main is how a member takes it back, so this
+        is the only way a declared character leaves rank 1 without another taking its place.
+        """
+        async with self._db.execute(
+            "DELETE FROM member_choices WHERE member_id = ? AND rank = ? RETURNING *",
+            (member_id, FIRST_CHOICE),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        await self._db.commit()
+        return _to_choice(row) if row is not None else None
+
+    async def main_of(self, member_id: int) -> MemberChoice | None:
+        """The member's main character, if they declared one."""
+        async with self._db.execute(
+            "SELECT * FROM member_choices WHERE member_id = ? AND rank = ?",
+            (member_id, FIRST_CHOICE),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        return _to_choice(row) if row is not None else None
+
+    async def alternates_of(self, member_id: int) -> list[MemberChoice]:
+        """Every class the member listed besides their main character."""
+        async with self._db.execute(
+            "SELECT * FROM member_choices WHERE member_id = ? AND rank > ? ORDER BY rank",
+            (member_id, FIRST_CHOICE),
+        ) as cursor:
+            return [_to_choice(row) for row in await cursor.fetchall()]
+
+    async def alternate_of(self, member_id: int, class_key: str) -> MemberChoice | None:
+        """That class among the member's alternates, whatever role it was declared for.
+
+        Matching on the class alone, not on the class and role: a member clicking a button
+        names a class, and the button cannot say which role they had picked behind it.
+        """
+        async with self._db.execute(
+            "SELECT * FROM member_choices WHERE member_id = ? AND rank > ? AND class_key = ? "
+            "ORDER BY rank",
+            (member_id, FIRST_CHOICE, class_key),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        return _to_choice(row) if row is not None else None
+
+    async def remove_alternate(self, member_id: int, class_key: str) -> MemberChoice | None:
+        """Drop that class from the member's alternates. Returns what was removed."""
+        async with self._db.execute(
+            "DELETE FROM member_choices WHERE member_id = ? AND rank > ? AND class_key = ? "
+            "RETURNING *",
+            (member_id, FIRST_CHOICE, class_key),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        await self._db.commit()
+        return _to_choice(row) if row is not None else None
+
+    async def add_alternate(
+        self,
+        member_id: int,
+        class_key: str,
+        role_key: str,
+        max_choices: int,
+    ) -> MemberChoice | None:
+        """Add an alternate at the lowest free rank. Returns None when every rank is taken.
+
+        Removing an alternate leaves a hole in the ranks, which this fills: the ranks of
+        alternates carry no meaning, only the fact of being above the main character's.
+        """
+        await self._db.execute("BEGIN")
+        try:
+            async with self._db.execute(
+                "SELECT rank FROM member_choices WHERE member_id = ? AND rank > ?",
+                (member_id, FIRST_CHOICE),
+            ) as cursor:
+                taken = {row["rank"] for row in await cursor.fetchall()}
+
+            free = next(
+                (rank for rank in range(FIRST_CHOICE + 1, max_choices + 1) if rank not in taken),
+                None,
+            )
+            if free is None:
+                await self._db.commit()
+                return None
+
+            async with self._db.execute(
+                f"{INSERT_CHOICE} RETURNING *",
+                (member_id, free, class_key, role_key, to_iso(utcnow())),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row is None:  # pragma: no cover -- RETURNING always yields a row on success
+                raise RuntimeError(f"Alternate of member {member_id} returned no row")
         except Exception:
             await self._db.rollback()
             raise
@@ -110,22 +231,12 @@ class ClassRepo:
         return cursor.rowcount
 
     async def choices_of(self, member_id: int) -> list[MemberChoice]:
-        """One member's choices, best first."""
+        """One member's choices, main first."""
         async with self._db.execute(
             "SELECT * FROM member_choices WHERE member_id = ? ORDER BY rank",
             (member_id,),
         ) as cursor:
             return [_to_choice(row) for row in await cursor.fetchall()]
-
-    async def first_choice_of(self, member_id: int) -> MemberChoice | None:
-        """The member's main character, if they declared one."""
-        async with self._db.execute(
-            "SELECT * FROM member_choices WHERE member_id = ? AND rank = ?",
-            (member_id, FIRST_CHOICE),
-        ) as cursor:
-            row = await cursor.fetchone()
-
-        return _to_choice(row) if row is not None else None
 
     async def all_choices(self) -> list[MemberChoice]:
         """Every choice declared in the guild, grouped by member and ordered by rank."""
@@ -134,8 +245,12 @@ class ClassRepo:
         ) as cursor:
             return [_to_choice(row) for row in await cursor.fetchall()]
 
-    async def directory(self) -> list[tuple[str, list[MemberChoice]]]:
-        """Every member who declared something, with their choices, by display name."""
+    async def declarations(self) -> list[tuple[str, MemberChoice]]:
+        """Every declared character, with the display name of whoever declared it.
+
+        One row per character rather than one per member: the boards lay characters out in
+        role columns, so the grouping by member would only have to be undone.
+        """
         async with self._db.execute(
             """
             SELECT m.display_name, c.*
@@ -146,11 +261,7 @@ class ClassRepo:
         ) as cursor:
             rows = await cursor.fetchall()
 
-        grouped: dict[int, tuple[str, list[MemberChoice]]] = {}
-        for row in rows:
-            entry = grouped.setdefault(row["member_id"], (row["display_name"], []))
-            entry[1].append(_to_choice(row))
-        return list(grouped.values())
+        return [(row["display_name"], _to_choice(row)) for row in rows]
 
     # --- Discord roles ----------------------------------------------------------------
 

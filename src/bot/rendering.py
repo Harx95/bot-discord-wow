@@ -1,4 +1,4 @@
-"""Embed rendering for polls and class composition."""
+"""Embed rendering for polls and class boards."""
 
 from collections import Counter
 from collections.abc import Sequence
@@ -16,9 +16,6 @@ BAR_EMPTY = "▱"
 OPEN_FOOTER = "Un seul vote par personne — tu peux en changer à tout moment."
 CLOSED_FOOTER = "Sondage clos."
 NO_VOTES = "_Aucun vote pour l'instant._"
-
-# Discord caps an embed description at 4096 characters.
-EMBED_DESCRIPTION_BUDGET = 4000
 
 
 def _bar(votes: int, total: int) -> str:
@@ -83,99 +80,42 @@ def results_embed(
     return embed
 
 
-# --- classes -------------------------------------------------------------------------
+# --- class boards --------------------------------------------------------------------
 
-RANK_MARKS = ("①", "②", "③", "④", "⑤")
-DIRECTORY_EMPTY = "_Personne n'a encore déclaré de personnage._"
-COMPOSITION_EMPTY = "_Personne n'a encore déclaré de personnage principal._"
+# A member's display name paired with one character they declared.
+Declaration = tuple[str, MemberChoice]
 
+MAIN_BOARD_TITLE = "Composition au lancement"
+ALTERNATES_BOARD_TITLE = "Autres classes envisagées au lancement"
 
-def rank_mark(rank: int) -> str:
-    """A compact marker for a rank, falling back to a plain number past the marks."""
-    return RANK_MARKS[rank - 1] if rank <= len(RANK_MARKS) else f"{rank}."
+HEADING = "### "
 
+MAIN_BOARD_INTRO = (
+    f"{HEADING}Le personnage que tu comptes jouer au lancement.\n"
+    f"{HEADING}Il te donne le rôle Discord de la classe et colore ton pseudo.\n"
+    f"{HEADING}Clique sur ta classe, reclique dessus pour la retirer."
+)
+ALTERNATES_BOARD_INTRO = (
+    f"{HEADING}Les autres classes auxquelles tu réfléchis pour ton personnage "
+    "principal, sans avoir encore tranché.\n"
+    f"{HEADING}{{max}} au maximum. Clique pour en ajouter une, reclique pour la retirer."
+)
 
-def _choice_text(catalog: ClassCatalog, emojis: EmojiStore, choice: MemberChoice) -> str:
-    """One choice as `icon Classe · icon Rôle`, with names for anyone without emoji."""
-    klass = catalog.get(choice.class_key)
-    role = catalog.role(choice.role_key)
-    class_name = klass.name if klass else choice.class_key
-    role_name = role.label if role else choice.role_key
+MAIN_BOARD_EMPTY = "Personne n'a encore déclaré de personnage principal."
+ALTERNATES_BOARD_EMPTY = "Personne n'a encore déclaré d'autre classe."
+COMPOSITION_EMPTY = "Personne n'a encore déclaré de personnage principal."
 
-    return (
-        f"{emojis.rendered_class(choice.class_key)} {class_name}"
-        f" · {emojis.rendered_role(choice.role_key)} {role_name}"
-    )
+EMPTY_COLUMN = "—"
 
-
-def classes_embed(catalog: ClassCatalog, emojis: EmojiStore) -> discord.Embed:
-    """The persistent message inviting members to rank the characters they will play."""
-    roles_line = " · ".join(
-        f"{emojis.rendered_role(role.key)} {role.label}" for role in catalog.roles
-    )
-
-    embed = discord.Embed(
-        title="Quelles classes joueras-tu ?",
-        description=(
-            f"Choisis jusqu'à **{catalog.max_choices} personnages**, "
-            "du plus voulu au moins voulu.\n"
-            f"Le **choix {rank_mark(1)}** te donne le rôle Discord de la classe "
-            "et colore ton pseudo ; les suivants servent à équilibrer la composition.\n\n"
-            f"{roles_line}"
-        ),
-        colour=discord.Colour.blurple(),
-    )
-
-    for klass in catalog.classes:
-        playable = " ".join(
-            f"{emojis.rendered_role(role.key)} {role.label}" for role in catalog.roles_of(klass.key)
-        )
-        embed.add_field(
-            name=f"{emojis.rendered_class(klass.key)} {klass.name}",
-            value=playable or "—",
-            inline=True,
-        )
-
-    embed.set_footer(text="Clique sur une classe, puis sur un rôle. « Recommencer » efface tout.")
-    return embed
-
-
-def directory_embed(
-    catalog: ClassCatalog,
-    emojis: EmojiStore,
-    entries: Sequence[tuple[str, list[MemberChoice]]],
-) -> discord.Embed:
-    """Who plays what, one line per member, kept within the embed limits."""
-    embed = discord.Embed(
-        title="Annuaire des personnages",
-        colour=discord.Colour.blurple(),
-    )
-
-    if not entries:
-        embed.description = DIRECTORY_EMPTY
-        return embed
-
-    lines: list[str] = []
-    for name, choices in entries:
-        ranked = " • ".join(
-            f"{rank_mark(choice.rank)} {_choice_text(catalog, emojis, choice)}"
-            for choice in choices
-        )
-        lines.append(f"**{name}** — {ranked}")
-
-    shown, hidden = _fit(lines, EMBED_DESCRIPTION_BUDGET)
-    embed.description = "\n".join(shown)
-
-    suffix = f" · {hidden} de plus non affiché(s)" if hidden else ""
-    embed.set_footer(text=f"{len(entries)} personne(s){suffix}")
-    return embed
+# Discord caps an embed field value at 1024 characters; the margin absorbs the newlines.
+EMBED_FIELD_BUDGET = 1000
 
 
 def _fit(lines: list[str], budget: int) -> tuple[list[str], int]:
     """As many lines as fit in the budget, and how many were left out.
 
-    An embed description is capped at 4096 characters: past a certain guild size the
-    directory has to stop somewhere rather than be rejected by Discord.
+    A field value is capped at 1024 characters: past a certain guild size a column has to
+    stop somewhere rather than have the whole embed rejected by Discord.
     """
     kept: list[str] = []
     used = 0
@@ -187,12 +127,105 @@ def _fit(lines: list[str], budget: int) -> tuple[list[str], int]:
     return kept, 0
 
 
+def _column_lines(
+    catalog: ClassCatalog,
+    emojis: EmojiStore,
+    rows: Sequence[Declaration],
+) -> list[str]:
+    """One line per character: the class icon, then who declared it.
+
+    Sorted by class as configured, then by name, so the same class groups together. Names
+    are escaped: a pseudo holding an asterisk would otherwise italicise the column.
+    """
+    order = {key: index for index, key in enumerate(catalog.class_keys)}
+    ordered = sorted(
+        rows,
+        key=lambda row: (order.get(row[1].class_key, len(order)), row[0].casefold()),
+    )
+    return [
+        f"{emojis.rendered_class(choice.class_key)} {discord.utils.escape_markdown(name)}"
+        for name, choice in ordered
+    ]
+
+
+def _add_role_columns(
+    embed: discord.Embed,
+    catalog: ClassCatalog,
+    emojis: EmojiStore,
+    rows: Sequence[Declaration],
+) -> int:
+    """One inline field per raid role, side by side. Returns how many lines were dropped."""
+    hidden = 0
+    for role in catalog.roles:
+        lines = _column_lines(catalog, emojis, [row for row in rows if row[1].role_key == role.key])
+        shown, dropped = _fit(lines, EMBED_FIELD_BUDGET)
+        hidden += dropped
+        embed.add_field(
+            name=f"{emojis.rendered_role(role.key)} {role.label} · {len(lines)}",
+            value="\n".join(shown) or EMPTY_COLUMN,
+            inline=True,
+        )
+    return hidden
+
+
+def _set_board_footer(
+    embed: discord.Embed,
+    rows: Sequence[Declaration],
+    hidden: int,
+    empty: str,
+) -> None:
+    """How many people the board covers, or why it is bare."""
+    people = len({choice.member_id for _, choice in rows})
+    if people == 0:
+        embed.set_footer(text=empty)
+        return
+
+    suffix = f" · {hidden} de plus non affiché(s)" if hidden else ""
+    embed.set_footer(text=f"{people} personne(s){suffix}")
+
+
+def main_board_embed(
+    catalog: ClassCatalog,
+    emojis: EmojiStore,
+    declarations: Sequence[Declaration],
+) -> discord.Embed:
+    """The main characters, laid out in tank, healer and damage columns."""
+    rows = [row for row in declarations if row[1].is_first]
+
+    embed = discord.Embed(
+        title=MAIN_BOARD_TITLE,
+        description=MAIN_BOARD_INTRO,
+        colour=discord.Colour.blurple(),
+    )
+    hidden = _add_role_columns(embed, catalog, emojis, rows)
+    _set_board_footer(embed, rows, hidden, MAIN_BOARD_EMPTY)
+    return embed
+
+
+def alternates_board_embed(
+    catalog: ClassCatalog,
+    emojis: EmojiStore,
+    declarations: Sequence[Declaration],
+) -> discord.Embed:
+    """The alternates, same columns. Ranks are not shown: they carry no meaning here."""
+    rows = [row for row in declarations if not row[1].is_first]
+
+    embed = discord.Embed(
+        title=ALTERNATES_BOARD_TITLE,
+        description=ALTERNATES_BOARD_INTRO.format(max=catalog.max_alternates),
+        colour=discord.Colour.greyple(),
+    )
+    hidden = _add_role_columns(embed, catalog, emojis, rows)
+    _set_board_footer(embed, rows, hidden, ALTERNATES_BOARD_EMPTY)
+    return embed
+
+
 def composition_embed(
     catalog: ClassCatalog,
     emojis: EmojiStore,
     choices: Sequence[MemberChoice],
 ) -> discord.Embed:
-    """Raid composition: first choices per role, and what the later ones would cover."""
+    """Raid composition: main characters per role, and what the alternates would cover."""
     firsts = [choice for choice in choices if choice.is_first]
     backups = [choice for choice in choices if not choice.is_first]
 
@@ -205,7 +238,7 @@ def composition_embed(
     role_lines = [
         f"{emojis.rendered_role(role.key)} **{role.label}** — {role_counts.get(role.key, 0)}"
         + (
-            f"  _(+{backup_counts[role.key]} en choix suivant)_"
+            f"  _(+{backup_counts[role.key]} en classe envisagée)_"
             if backup_counts.get(role.key)
             else ""
         )
@@ -229,5 +262,5 @@ def composition_embed(
     )
 
     if not firsts:
-        embed.set_footer(text="Personne n'a encore déclaré de personnage principal.")
+        embed.set_footer(text=COMPOSITION_EMPTY)
     return embed

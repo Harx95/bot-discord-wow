@@ -1,4 +1,4 @@
-"""Class buttons, role hierarchy checks and the embeds built from them."""
+"""Class buttons, role hierarchy checks and the boards built from them."""
 
 from datetime import UTC, datetime
 from typing import cast
@@ -7,19 +7,25 @@ import discord
 import pytest
 
 from bot.emojis import EmojiStore
-from bot.rendering import classes_embed, composition_embed, directory_embed, rank_mark
+from bot.rendering import (
+    Declaration,
+    alternates_board_embed,
+    composition_embed,
+    main_board_embed,
+)
 from bot.roles import MISSING_PERMISSION, apply_class_role, hierarchy_error, sync_class_roles
 from bot.views.classes import (
-    CLASS_TEMPLATE,
-    RESET_TEMPLATE,
+    ALTERNATE_CLASS_TEMPLATE,
+    MAIN_CLASS_TEMPLATE,
     ROLE_TEMPLATE,
-    ClassButton,
-    ResetButton,
-    build_classes_view,
+    AlternateClassButton,
+    MainClassButton,
+    build_alternates_view,
+    build_main_view,
 )
 from config import (
-    RESET_CUSTOM_ID,
     ClassCatalog,
+    Slot,
     build_class_button_custom_id,
     build_role_button_custom_id,
 )
@@ -31,9 +37,9 @@ NOW = datetime(2026, 9, 29, tzinfo=UTC)
 
 EMBED_TOTAL_LIMIT = 6000
 EMBED_FIELD_LIMIT = 1024
-EMBED_DESCRIPTION_LIMIT = 4096
 COMPONENTS_PER_MESSAGE = 25
-FIELDS_PER_EMBED = 25
+
+TANK, HEAL, DPS = 0, 1, 2
 
 
 @pytest.fixture
@@ -52,74 +58,154 @@ def _choice(member_id: int, rank: int, class_key: str, role_key: str) -> MemberC
     )
 
 
+def _row(name: str, member_id: int, rank: int, class_key: str, role_key: str) -> Declaration:
+    """One declared character, as the repository hands it to the renderer."""
+    return (name, _choice(member_id, rank, class_key, role_key))
+
+
+def _values(embed: discord.Embed) -> list[str]:
+    """The three column bodies, in role order."""
+    return [field.value or "" for field in embed.fields]
+
+
 # --- custom_id round trip ------------------------------------------------------------
 
 
-def test_the_class_template_matches_every_configured_class(classes: ClassCatalog) -> None:
+def test_the_main_template_matches_every_configured_class(classes: ClassCatalog) -> None:
     """If these drifted apart, the buttons would go dead after a restart."""
     for klass in classes.classes:
-        match = CLASS_TEMPLATE.fullmatch(build_class_button_custom_id(klass.key))
+        custom_id = build_class_button_custom_id(Slot.MAIN, klass.key)
+        match = MAIN_CLASS_TEMPLATE.fullmatch(custom_id)
+
         assert match is not None
         assert match["klass"] == klass.key
 
 
-def test_the_role_template_matches_every_playable_pair(classes: ClassCatalog) -> None:
+def test_the_alternate_template_matches_every_configured_class(classes: ClassCatalog) -> None:
     for klass in classes.classes:
-        for role in classes.roles_of(klass.key):
-            custom_id = build_role_button_custom_id(klass.key, role.key)
-            match = ROLE_TEMPLATE.fullmatch(custom_id)
-            assert match is not None
-            assert (match["klass"], match["role"]) == (klass.key, role.key)
+        custom_id = build_class_button_custom_id(Slot.ALTERNATE, klass.key)
+        match = ALTERNATE_CLASS_TEMPLATE.fullmatch(custom_id)
+
+        assert match is not None
+        assert match["klass"] == klass.key
 
 
-def test_the_reset_template_matches_its_custom_id() -> None:
-    assert RESET_TEMPLATE.fullmatch(RESET_CUSTOM_ID) is not None
+def test_the_role_template_carries_the_board_it_came_from(classes: ClassCatalog) -> None:
+    for slot in Slot:
+        for klass in classes.classes:
+            for role in classes.roles_of(klass.key):
+                custom_id = build_role_button_custom_id(slot, klass.key, role.key)
+                match = ROLE_TEMPLATE.fullmatch(custom_id)
+
+                assert match is not None
+                assert Slot(match["slot"]) is slot
+                assert (match["klass"], match["role"]) == (klass.key, role.key)
+
+
+def test_the_two_board_templates_do_not_overlap() -> None:
+    """A click on one board must never be handled as a click on the other."""
+    main = build_class_button_custom_id(Slot.MAIN, "mage")
+    alternate = build_class_button_custom_id(Slot.ALTERNATE, "mage")
+
+    assert ALTERNATE_CLASS_TEMPLATE.fullmatch(main) is None
+    assert MAIN_CLASS_TEMPLATE.fullmatch(alternate) is None
 
 
 def test_a_class_custom_id_does_not_match_the_role_template() -> None:
-    """The two prefixes must not overlap, or the wrong handler would run."""
-    assert ROLE_TEMPLATE.fullmatch(build_class_button_custom_id("mage")) is None
+    """The prefixes must not overlap, or the wrong handler would run."""
+    assert ROLE_TEMPLATE.fullmatch(build_class_button_custom_id(Slot.MAIN, "mage")) is None
+    assert ROLE_TEMPLATE.fullmatch(build_class_button_custom_id(Slot.ALTERNATE, "mage")) is None
 
 
-# --- the persistent view -------------------------------------------------------------
+def test_a_role_custom_id_does_not_match_a_class_template() -> None:
+    custom_id = build_role_button_custom_id(Slot.MAIN, "mage", "dps")
+
+    assert MAIN_CLASS_TEMPLATE.fullmatch(custom_id) is None
+    assert ALTERNATE_CLASS_TEMPLATE.fullmatch(custom_id) is None
 
 
-def test_the_view_holds_one_button_per_class_plus_reset(
+def test_every_custom_id_matches_exactly_one_template(classes: ClassCatalog) -> None:
+    """The decisive property for persistence.
+
+    After a restart discord.py rebuilds a handler by matching the custom_id stored in the
+    message against each registered template. Two matches would make the handler depend on
+    registration order; none would leave the button dead.
+    """
+    templates = (MAIN_CLASS_TEMPLATE, ALTERNATE_CLASS_TEMPLATE, ROLE_TEMPLATE)
+
+    sent: list[str] = []
+    for slot in Slot:
+        for klass in classes.classes:
+            sent.append(build_class_button_custom_id(slot, klass.key))
+            for role in classes.roles_of(klass.key):
+                sent.append(build_role_button_custom_id(slot, klass.key, role.key))
+
+    for custom_id in sent:
+        matching = [t for t in templates if t.fullmatch(custom_id) is not None]
+        assert len(matching) == 1, f"{custom_id} matched {len(matching)} templates"
+
+
+# --- the persistent views ------------------------------------------------------------
+
+
+def test_each_board_holds_exactly_one_button_per_class(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    view = build_classes_view(classes, emojis)
-
-    assert view.timeout is None
-    assert len(view.children) == len(classes.classes) + 1
-    assert all(item.is_persistent() for item in view.children)
-
-
-def test_the_view_fits_within_one_message(classes: ClassCatalog, emojis: EmojiStore) -> None:
-    """25 components maximum; validation caps the classes so the reset button fits."""
-    assert len(build_classes_view(classes, emojis).children) <= COMPONENTS_PER_MESSAGE
+    """No reset button: a second click on a class is what undoes it."""
+    for view in (build_main_view(classes, emojis), build_alternates_view(classes, emojis)):
+        assert view.timeout is None
+        assert len(view.children) == len(classes.classes)
+        assert all(item.is_persistent() for item in view.children)
 
 
-def test_the_buttons_carry_the_class_names_and_fallback_emojis(
+def test_each_board_fits_within_one_message(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    view = build_classes_view(classes, emojis)
-    buttons = [item for item in view.children if isinstance(item, ClassButton)]
-
-    assert [b.item.label for b in buttons] == [k.name for k in classes.classes]
-    assert all(b.item.emoji is not None for b in buttons)
+    """25 components maximum per message, which is why the boards are split in two."""
+    assert len(build_main_view(classes, emojis).children) <= COMPONENTS_PER_MESSAGE
+    assert len(build_alternates_view(classes, emojis).children) <= COMPONENTS_PER_MESSAGE
 
 
-def test_the_reset_button_is_last_and_destructive_looking(
+def test_the_buttons_show_the_icon_and_the_class_name(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    view = build_classes_view(classes, emojis)
-    last = view.children[-1]
+    buttons = [
+        item
+        for item in build_main_view(classes, emojis).children
+        if isinstance(item, MainClassButton)
+    ]
 
-    assert isinstance(last, ResetButton)
-    assert last.item.style is discord.ButtonStyle.danger
+    assert [button.item.label for button in buttons] == [k.name for k in classes.classes]
+    assert all(button.item.emoji is not None for button in buttons)
+
+
+def test_every_button_stays_grey_on_both_boards(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    """A style belongs to the message, so a coloured one would show the last clicker."""
+    for view in (build_main_view(classes, emojis), build_alternates_view(classes, emojis)):
+        assert all(
+            cast(discord.ui.Button[discord.ui.View], item.item).style
+            is discord.ButtonStyle.secondary
+            for item in view.children
+            if isinstance(item, MainClassButton | AlternateClassButton)
+        )
+
+
+def test_the_board_decides_which_buttons_it_holds(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    """Otherwise a click on one board would be recorded on the other."""
+    main = build_main_view(classes, emojis)
+    alternates = build_alternates_view(classes, emojis)
+
+    assert all(isinstance(item, MainClassButton) for item in main.children)
+    assert all(isinstance(item, AlternateClassButton) for item in alternates.children)
 
 
 # --- hierarchy -----------------------------------------------------------------------
@@ -161,7 +247,7 @@ async def test_the_class_role_is_added() -> None:
     assert member.added == [mage]
 
 
-async def test_a_new_first_choice_removes_the_previous_class_role() -> None:
+async def test_a_new_main_removes_the_previous_class_role() -> None:
     """Two class roles would make the nickname colour depend on their order."""
     mage = FakeRole("Mage", 5, role_id=1)
     druide = FakeRole("Druide", 6, role_id=2)
@@ -174,8 +260,8 @@ async def test_a_new_first_choice_removes_the_previous_class_role() -> None:
     assert member.added == [druide]
 
 
-async def test_resetting_takes_the_class_role_back() -> None:
-    """The reset button passes None: the member ends up with no class colour."""
+async def test_passing_no_role_strips_the_class_colour() -> None:
+    """How a member ends up with no class colour, once something clears their choices."""
     mage = FakeRole("Mage", 5, role_id=1)
     member = FakeMember(as_guild(), [mage])
 
@@ -220,75 +306,191 @@ async def test_nothing_is_touched_when_the_hierarchy_blocks_it() -> None:
     assert member.removed == []
 
 
-# --- rendering -----------------------------------------------------------------------
+# --- the main board ------------------------------------------------------------------
 
 
-def test_the_selection_embed_lists_every_class(
+def test_the_main_board_sorts_people_into_role_columns(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    embed = classes_embed(classes, emojis)
-
-    assert len(embed.fields) == len(classes.classes)
-    assert embed.description is not None
-    assert str(classes.max_choices) in embed.description
-
-
-def test_the_selection_embed_shows_the_roles_each_class_can_fill(
-    classes: ClassCatalog,
-    emojis: EmojiStore,
-) -> None:
-    fields = {field.name: field.value for field in classes_embed(classes, emojis).fields}
-    mage = next(name for name in fields if name and "Mage" in name)
-
-    assert "DPS" in (fields[mage] or "")
-    assert "Tank" not in (fields[mage] or "")
-
-
-def test_the_directory_lists_each_member_and_their_ranks(
-    classes: ClassCatalog,
-    emojis: EmojiStore,
-) -> None:
-    entries = [
-        ("Kaeldin", [_choice(1, 1, "mage", "dps"), _choice(1, 2, "druide", "tank")]),
-        ("Sylvara", [_choice(2, 1, "pretre", "heal")]),
+    rows = [
+        _row("Kaeldin", 1, 1, "mage", "dps"),
+        _row("Sylvara", 2, 1, "pretre", "heal"),
+        _row("Bran", 3, 1, "druide", "tank"),
     ]
 
-    description = directory_embed(classes, emojis, entries).description or ""
+    columns = _values(main_board_embed(classes, emojis, rows))
 
-    assert "Kaeldin" in description
-    assert "Sylvara" in description
-    assert rank_mark(1) in description
-    assert rank_mark(2) in description
-    assert "Mage" in description
-
-
-def test_an_empty_directory_says_so(classes: ClassCatalog, emojis: EmojiStore) -> None:
-    embed = directory_embed(classes, emojis, [])
-
-    assert embed.description is not None
-    assert "Personne" in embed.description
+    assert "Bran" in columns[TANK]
+    assert "Sylvara" in columns[HEAL]
+    assert "Kaeldin" in columns[DPS]
+    assert "Kaeldin" not in columns[TANK]
 
 
-def test_a_large_directory_is_truncated_rather_than_rejected(
+def test_the_main_board_shows_the_class_icon_beside_the_name(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    """Discord refuses a description over 4096 characters outright."""
-    entries = [
-        (f"Joueur{i:03d}", [_choice(i, 1, "mage", "dps"), _choice(i, 2, "druide", "tank")])
-        for i in range(400)
-    ]
+    """Without uploaded icons the unicode fallback stands in, so the line is never bare."""
+    mage = classes.get("mage")
+    assert mage is not None and mage.emoji is not None
 
-    embed = directory_embed(classes, emojis, entries)
+    columns = _values(main_board_embed(classes, emojis, [_row("Kaeldin", 1, 1, "mage", "dps")]))
 
-    assert embed.description is not None
-    assert len(embed.description) <= EMBED_DESCRIPTION_LIMIT
+    assert f"{mage.emoji} Kaeldin" in columns[DPS]
+
+
+def test_the_column_headers_carry_the_role_and_its_count(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    rows = [_row("Kaeldin", 1, 1, "mage", "dps"), _row("Sylvara", 2, 1, "voleur", "dps")]
+
+    names = [field.name or "" for field in main_board_embed(classes, emojis, rows).fields]
+
+    assert "Tank · 0" in names[TANK]
+    assert "DPS · 2" in names[DPS]
+
+
+def test_the_main_board_leaves_out_the_alternates(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    rows = [_row("Kaeldin", 1, 1, "mage", "dps"), _row("Kaeldin", 1, 2, "druide", "tank")]
+
+    columns = _values(main_board_embed(classes, emojis, rows))
+
+    assert "Kaeldin" in columns[DPS]
+    assert columns[TANK] == "—"
+
+
+def test_an_empty_main_board_says_so(classes: ClassCatalog, emojis: EmojiStore) -> None:
+    embed = main_board_embed(classes, emojis, [])
+
+    assert _values(embed) == ["—", "—", "—"]
+    assert embed.footer.text is not None
+    assert "Personne" in embed.footer.text
+
+
+def test_the_main_board_counts_the_people_it_covers(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    rows = [_row("Kaeldin", 1, 1, "mage", "dps"), _row("Sylvara", 2, 1, "druide", "tank")]
+
+    footer = main_board_embed(classes, emojis, rows).footer.text
+
+    assert footer is not None
+    assert footer.startswith("2 personne(s)")
+
+
+# --- the alternates board ------------------------------------------------------------
+
+
+def test_the_alternates_board_leaves_out_the_main_character(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    rows = [_row("Kaeldin", 1, 1, "mage", "dps"), _row("Kaeldin", 1, 2, "druide", "tank")]
+
+    columns = _values(alternates_board_embed(classes, emojis, rows))
+
+    assert "Kaeldin" in columns[TANK]
+    assert columns[DPS] == "—"
+
+
+def test_the_alternates_board_does_not_distinguish_the_ranks(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    """Rank 2 and rank 3 sit in the same list: the order carries no meaning."""
+    rows = [_row("Kaeldin", 1, 2, "druide", "tank"), _row("Sylvara", 2, 3, "guerrier", "tank")]
+
+    columns = _values(alternates_board_embed(classes, emojis, rows))
+
+    assert "Kaeldin" in columns[TANK]
+    assert "Sylvara" in columns[TANK]
+    assert "①" not in columns[TANK]
+    assert "②" not in columns[TANK]
+
+
+def test_someone_appears_twice_when_they_listed_two_alternates(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    rows = [_row("Kaeldin", 1, 2, "druide", "tank"), _row("Kaeldin", 1, 3, "pretre", "heal")]
+
+    embed = alternates_board_embed(classes, emojis, rows)
+    columns = _values(embed)
+
+    assert "Kaeldin" in columns[TANK]
+    assert "Kaeldin" in columns[HEAL]
+    assert embed.footer.text is not None
+    assert embed.footer.text.startswith("1 personne(s)")
+
+
+def test_the_alternates_board_states_how_many_are_allowed(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    description = alternates_board_embed(classes, emojis, []).description or ""
+
+    assert str(classes.max_alternates) in description
+
+
+def test_an_empty_alternates_board_says_so(classes: ClassCatalog, emojis: EmojiStore) -> None:
+    embed = alternates_board_embed(classes, emojis, [])
+
+    assert embed.footer.text is not None
+    assert "Personne" in embed.footer.text
+
+
+# --- board limits --------------------------------------------------------------------
+
+
+def test_a_name_holding_markdown_is_escaped(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    """An asterisk in a pseudo would otherwise italicise the rest of the column."""
+    columns = _values(main_board_embed(classes, emojis, [_row("Ka*el*din", 1, 1, "mage", "dps")]))
+
+    assert r"Ka\*el\*din" in columns[DPS]
+
+
+def test_a_crowded_column_is_truncated_rather_than_rejected(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    """Discord refuses a field value over 1024 characters outright."""
+    rows = [_row(f"Joueur{index:03d}", index, 1, "mage", "dps") for index in range(400)]
+
+    embed = main_board_embed(classes, emojis, rows)
+
+    assert len(_values(embed)[DPS]) <= EMBED_FIELD_LIMIT
     assert embed.footer.text is not None
     assert "non affiché" in embed.footer.text
 
 
-def test_composition_counts_first_choices_per_role(
+def test_the_boards_stay_within_the_api_limits(
+    classes: ClassCatalog,
+    emojis: EmojiStore,
+) -> None:
+    rows = [_row(f"Joueur{index:03d}", index, 1, "druide", "tank") for index in range(200)]
+    rows += [_row(f"Joueur{index:03d}", index, 2, "mage", "dps") for index in range(200)]
+
+    for embed in (
+        main_board_embed(classes, emojis, rows),
+        alternates_board_embed(classes, emojis, rows),
+    ):
+        assert len(embed) <= EMBED_TOTAL_LIMIT
+        assert all(len(value) <= EMBED_FIELD_LIMIT for value in _values(embed))
+
+
+# --- composition ---------------------------------------------------------------------
+
+
+def test_composition_counts_main_characters_per_role(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
@@ -304,17 +506,17 @@ def test_composition_counts_first_choices_per_role(
     assert "**DPS** — 1" in roles
 
 
-def test_composition_reports_later_choices_separately(
+def test_composition_reports_the_alternates_separately(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    """Two tanks with five tank second-choices is not the same guild as two tanks."""
+    """Two tanks with five tank alternates is not the same guild as two tanks."""
     choices = [_choice(1, 1, "mage", "dps"), _choice(1, 2, "druide", "tank")]
 
     roles = composition_embed(classes, emojis, choices).fields[0].value or ""
 
     assert "**Tank** — 0" in roles
-    assert "+1 en choix suivant" in roles
+    assert "+1 en classe envisagée" in roles
 
 
 def test_composition_lists_only_the_classes_actually_mained(
@@ -335,21 +537,17 @@ def test_an_empty_composition_says_so(classes: ClassCatalog, emojis: EmojiStore)
     assert "Personne" in embed.footer.text
 
 
-def test_the_embeds_stay_within_the_api_limits(
+def test_the_composition_stays_within_the_api_limits(
     classes: ClassCatalog,
     emojis: EmojiStore,
 ) -> None:
-    choices = [_choice(i, 1, "druide", "tank") for i in range(200)]
-    choices += [_choice(i, 2, "mage", "dps") for i in range(200)]
+    choices = [_choice(index, 1, "druide", "tank") for index in range(200)]
+    choices += [_choice(index, 2, "mage", "dps") for index in range(200)]
 
-    composition = composition_embed(classes, emojis, choices)
+    embed = composition_embed(classes, emojis, choices)
 
-    assert len(composition) <= EMBED_TOTAL_LIMIT
-    assert all(len(field.value or "") <= EMBED_FIELD_LIMIT for field in composition.fields)
-
-    selection = classes_embed(classes, emojis)
-    assert len(selection) <= EMBED_TOTAL_LIMIT
-    assert len(selection.fields) <= FIELDS_PER_EMBED
+    assert len(embed) <= EMBED_TOTAL_LIMIT
+    assert all(len(field.value or "") <= EMBED_FIELD_LIMIT for field in embed.fields)
 
 
 # --- creating the class roles --------------------------------------------------------

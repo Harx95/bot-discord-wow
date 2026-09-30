@@ -7,8 +7,10 @@
 # colour  hex, used for the Discord role and therefore for the nickname colour.
 # emoji   unicode fallback, shown until the matching icon is uploaded by /emojis.
 #
-# max_choices  how many ranked choices a member may declare. The first one drives
-#              their Discord role, and therefore their nickname colour.
+# max_choices  how many classes a member may declare in total, main character
+#              included: 3 means one main plus two alternates. The main character
+#              drives their Discord role, and therefore their nickname colour.
+#              Two boards are posted, so at least 2 is required.
 
 max_choices = 3
 

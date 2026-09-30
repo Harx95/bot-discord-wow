@@ -7,19 +7,18 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.boards import ALTERNATES_BOARD_KEY, MAIN_BOARD_KEY
 from bot.emojis import upload_missing_icons
 from bot.permissions import staff_only
-from bot.rendering import classes_embed, composition_embed
+from bot.rendering import composition_embed
 from bot.roles import sync_class_roles
-from bot.views.classes import build_classes_view
+from bot.views.classes import build_alternates_view, build_main_view
 from db import ClassRepo
 
 if TYPE_CHECKING:
     from bot.client import GuildBot
 
 _log = logging.getLogger(__name__)
-
-DIRECTORY_KEY = "class_directory"
 
 WRONG_CHANNEL = "Lance cette commande dans un salon textuel du serveur."
 MISSING_PERMISSIONS = (
@@ -28,13 +27,18 @@ MISSING_PERMISSIONS = (
 )
 NO_ROLES_YET = (
     "Aucun rôle de classe n'existe encore. Lance `/roles-classes` avant de poster "
-    "le message, sinon les membres ne recevront pas leur couleur."
+    "les messages, sinon les membres ne recevront pas leur couleur."
 )
 NOTHING_TO_DO = "Rien à faire."
+BOARDS_POSTED = (
+    "Les deux messages sont postés. Ils se mettent à jour à chaque déclaration.\n"
+    "Si tu relances cette commande, pense à supprimer les anciens : "
+    "leurs boutons marchent encore mais leur tableau reste figé."
+)
 
 
 class Classes(commands.Cog):
-    """Upload the icons, create the class roles, post the messages, read the composition."""
+    """Upload the icons, create the class roles, post the boards, read the composition."""
 
     def __init__(self, bot: "GuildBot") -> None:
         self.bot = bot
@@ -68,7 +72,7 @@ class Classes(commands.Cog):
 
         parts.append(
             "\nLes icônes absentes sont remplacées par l'emoji de repli de `classes.toml`. "
-            "Reposte le message avec `/classes` pour appliquer les nouvelles."
+            "Reposte les messages avec `/classes` pour appliquer les nouvelles."
         )
         await interaction.followup.send("\n".join(parts), ephemeral=True)
 
@@ -108,11 +112,11 @@ class Classes(commands.Cog):
 
     @app_commands.command(
         name="classes",
-        description="Poste le message de sélection de classe dans ce salon.",
+        description="Poste les deux messages de déclaration de classe dans ce salon.",
     )
     @staff_only
-    async def post_selection(self, interaction: discord.Interaction) -> None:
-        """Post the persistent message carrying the class buttons."""
+    async def post_boards(self, interaction: discord.Interaction) -> None:
+        """Post both boards and remember them, so every click rewrites the right one."""
         await interaction.response.defer(ephemeral=True)
 
         channel = await self._writable_channel(interaction)
@@ -122,34 +126,24 @@ class Classes(commands.Cog):
         classes = ClassRepo(self.bot.db)
         warning = "" if await classes.role_ids() else f"\n\n⚠️ {NO_ROLES_YET}"
 
-        await channel.send(
-            embed=classes_embed(self.bot.classes, self.bot.emojis_store),
-            view=build_classes_view(self.bot.classes, self.bot.emojis_store),
-        )
-        _log.info("Class selection message posted by %s", interaction.user)
-        await interaction.followup.send(f"Message posté.{warning}", ephemeral=True)
+        main, alternates = await self.bot.board_embeds()
+        catalog, emojis = self.bot.classes, self.bot.emojis_store
 
-    @app_commands.command(
-        name="annuaire",
-        description="Poste l'annuaire des personnages, tenu à jour automatiquement.",
-    )
-    @staff_only
-    async def post_directory(self, interaction: discord.Interaction) -> None:
-        """Post the directory and remember it, so every declaration rewrites it."""
-        await interaction.response.defer(ephemeral=True)
+        posted = [
+            (MAIN_BOARD_KEY, await channel.send(embed=main, view=build_main_view(catalog, emojis))),
+            (
+                ALTERNATES_BOARD_KEY,
+                await channel.send(
+                    embed=alternates,
+                    view=build_alternates_view(catalog, emojis),
+                ),
+            ),
+        ]
+        for key, message in posted:
+            await classes.remember_message(key, channel.id, message.id)
 
-        channel = await self._writable_channel(interaction)
-        if channel is None:
-            return
-
-        message = await channel.send(embed=await self.bot.directory_embed())
-        await ClassRepo(self.bot.db).remember_message(DIRECTORY_KEY, channel.id, message.id)
-        _log.info("Directory posted by %s in #%s", interaction.user, channel)
-
-        await interaction.followup.send(
-            "Annuaire posté. Il se met à jour à chaque déclaration.",
-            ephemeral=True,
-        )
+        _log.info("Class boards posted by %s in #%s", interaction.user, channel)
+        await interaction.followup.send(f"{BOARDS_POSTED}{warning}", ephemeral=True)
 
     @app_commands.command(
         name="composition",
@@ -157,7 +151,7 @@ class Classes(commands.Cog):
     )
     @staff_only
     async def composition(self, interaction: discord.Interaction) -> None:
-        """Show how the first choices spread across raid roles."""
+        """Show how the main characters spread across raid roles."""
         await interaction.response.defer(ephemeral=True)
 
         choices = await ClassRepo(self.bot.db).all_choices()

@@ -1,6 +1,7 @@
 """Class and raid-role definitions, read from TOML and validated by pydantic."""
 
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
@@ -15,26 +16,43 @@ ROLE_NAME_LIMIT = 100
 
 COLOUR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
 
-MAX_CHOICES_LIMIT = 5
+# A board message carries one button per class and nothing else, so the whole component
+# budget of a message is available: 25 buttons over 5 rows.
 BUTTONS_PER_VIEW = 25
+BUTTONS_PER_ROW = 5
 
-CLASS_BUTTON_PREFIX = "cls:p"
+# One main character, plus at least one alternate: below two the second board would have
+# nothing to hold.
+MIN_CHOICES = 2
+MAX_CHOICES_LIMIT = 5
+
+CLASS_BUTTON_PREFIX = "cls"
 ROLE_BUTTON_PREFIX = "cls:r"
-RESET_CUSTOM_ID = "cls:reset"
 
 # Emoji names the bot uploads to its application, one per class and per role.
 EMOJI_CLASS_PREFIX = "classe"
 EMOJI_ROLE_PREFIX = "role"
 
 
-def build_class_button_custom_id(class_key: str) -> str:
-    """custom_id of a class button on the persistent message."""
-    return f"{CLASS_BUTTON_PREFIX}:{class_key}"
+class Slot(StrEnum):
+    """Which of the two boards a button belongs to.
+
+    The slot travels in the custom_id: the same class appears on both boards, so a click
+    alone does not say whether it means "this is my main" or "I might also play this".
+    """
+
+    MAIN = "m"
+    ALTERNATE = "a"
 
 
-def build_role_button_custom_id(class_key: str, role_key: str) -> str:
-    """custom_id of a role button, shown after a class was picked."""
-    return f"{ROLE_BUTTON_PREFIX}:{class_key}:{role_key}"
+def build_class_button_custom_id(slot: Slot, class_key: str) -> str:
+    """custom_id of a class button on one of the two board messages."""
+    return f"{CLASS_BUTTON_PREFIX}:{slot}:{class_key}"
+
+
+def build_role_button_custom_id(slot: Slot, class_key: str, role_key: str) -> str:
+    """custom_id of a role button, shown after a class with several roles was picked."""
+    return f"{ROLE_BUTTON_PREFIX}:{slot}:{class_key}:{role_key}"
 
 
 def emoji_name(kind: str, key: str) -> str:
@@ -94,9 +112,10 @@ class ClassCatalog(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     roles: tuple[RoleDefinition, ...] = Field(min_length=1, max_length=SELECT_OPTIONS_LIMIT)
-    # One button per class, plus the reset button, on a single persistent view.
-    classes: tuple[ClassDefinition, ...] = Field(min_length=1, max_length=BUTTONS_PER_VIEW - 1)
-    max_choices: int = Field(default=3, ge=1, le=MAX_CHOICES_LIMIT)
+    # One button per class on each board message, which holds nothing else.
+    classes: tuple[ClassDefinition, ...] = Field(min_length=1, max_length=BUTTONS_PER_VIEW)
+    # Counting the main character: 3 means one main plus two alternates.
+    max_choices: int = Field(default=3, ge=MIN_CHOICES, le=MAX_CHOICES_LIMIT)
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -115,12 +134,20 @@ class ClassCatalog(BaseModel):
             if unknown:
                 raise ValueError(f"class {klass.key!r} references unknown roles: {sorted(unknown)}")
 
-            for role_key in klass.roles:
-                custom_id = build_role_button_custom_id(klass.key, role_key)
-                if len(custom_id) > CUSTOM_ID_LIMIT:
-                    raise ValueError(f"custom_id too long ({len(custom_id)} > {CUSTOM_ID_LIMIT})")
+            for slot in Slot:
+                for role_key in klass.roles:
+                    custom_id = build_role_button_custom_id(slot, klass.key, role_key)
+                    if len(custom_id) > CUSTOM_ID_LIMIT:
+                        raise ValueError(
+                            f"custom_id too long ({len(custom_id)} > {CUSTOM_ID_LIMIT})"
+                        )
 
         return self
+
+    @property
+    def max_alternates(self) -> int:
+        """How many classes a member may list besides their main character."""
+        return self.max_choices - 1
 
     def get(self, key: str) -> ClassDefinition | None:
         """Look up one class by key."""

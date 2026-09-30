@@ -61,16 +61,48 @@ Les classes, leurs couleurs et les rôles qu'elles peuvent tenir sont dans
 
 | Commande | Qui | Effet |
 |---|---|---|
+| `/emojis` | GM, Officier | Envoie les icônes de `assets/` comme emojis du bot |
 | `/roles-classes` | GM, Officier | Crée les rôles Discord de classe manquants |
-| `/classes` | GM, Officier | Poste le message de sélection dans le salon courant |
+| `/classes` | GM, Officier | Poste les deux messages de déclaration dans le salon courant |
 | `/composition` | GM, Officier | Répartition tank / soigneur / DPS |
 
 Lancer `/roles-classes` **avant** `/classes`, sinon les membres déclarent leur
 classe sans recevoir la couleur correspondante.
 
+`/classes` poste **deux** messages, tenus à jour à chaque clic :
+
+- **Composition au lancement** — le personnage principal, un seul par personne.
+- **Autres classes envisagées au lancement** — les autres classes auxquelles la
+  personne réfléchit pour son personnage principal, sans avoir tranché : jusqu'à
+  `max_choices - 1`, sans ordre entre elles.
+
+Chacun range les pseudos en trois colonnes tank / soigneur / DPS, l'icône de la
+classe devant le nom, et porte un bouton par classe avec son icône et son nom.
+
+Les boutons restent gris pour tout le monde. Le style d'un bouton fait partie du
+message, et un message de salon est identique pour tous : un bouton bleu y
+montrerait le dernier qui a cliqué, pas la personne qui regarde. Le retour
+visuel, ce sont les colonnes juste au-dessus, où un pseudo entre et sort en
+direct.
+
+Cliquer une classe la déclare, recliquer dessus la retire. Sur le premier
+message, cliquer une autre classe remplace la principale. Sur le second, une
+classe déjà déclarée comme principale est refusée, de même qu'une troisième
+quand les deux places sont prises — et ces refus tombent **avant** la question du
+rôle, pour ne pas la poser pour rien. Quand une classe ne peut tenir qu'un seul
+rôle, elle n'est pas posée non plus.
+
+Un clic n'envoie qu'un seul message éphémère : la question du rôle, une erreur ou
+une confirmation. La question du rôle se transforme en confirmation plutôt que
+d'en empiler une seconde, et tout message terminal s'efface après 30 secondes.
+
+Le créneau dont vient le clic est inscrit dans le `custom_id`, donc la même
+classe ne veut pas dire la même chose selon le message.
+
 Seule la classe principale donne un rôle Discord : deux rôles de classe
 rendraient la couleur du pseudo dépendante de leur ordre dans la hiérarchie.
-Les rerolls sont enregistrés en base et comptés dans `/composition`.
+Les classes envisagées sont enregistrées en base et comptées à part dans
+`/composition`.
 
 Le bot ne peut attribuer que des rôles situés **sous** le sien dans la
 hiérarchie. Les rôles de classe sont créés tout en bas, donc c'est acquis ;

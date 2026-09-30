@@ -33,6 +33,19 @@ class MemberChoice:
 
 
 @dataclass(frozen=True, slots=True)
+class MainUpdate:
+    """The outcome of declaring a main character."""
+
+    choice: MemberChoice
+    # False when that exact class and role was already the main: nothing was written.
+    changed: bool
+    # True when the pair was an alternate and moved up to the main slot.
+    promoted: bool
+    # The class that was the main before, when a different one replaced it.
+    replaced_class_key: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ClassRole:
     """The Discord role created for a class."""
 

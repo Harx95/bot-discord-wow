@@ -3,11 +3,16 @@
 Une étape à la fois. Ne pas anticiper les suivantes.
 Chaque étape se termine par : test manuel réussi, puis commit, puis rendu d'explication technique court et concis.
 
-## Où on en est — 29 septembre 2026
+## Où on en est — 30 septembre 2026
 
-Étapes 1 à 3 terminées, testées et commitées.
-**Étape 4 écrite et commitée, mais PAS encore testée manuellement** : c'est la
-première chose à faire à la reprise. Le scénario est en bas de ce fichier.
+Étapes 1 à 4 terminées, testées sur le serveur et commitées.
+**Prochaine étape : la 5**, le sondage du nom de guilde. Elle amène les modales,
+sur lesquelles se greffera la commande de création de sondage à la volée.
+
+L'étape 4 a été remaniée le 30 septembre, après un premier jet : deux messages
+au lieu d'un, chacun avec son tableau en colonnes Tank / Soigneur / DPS, des
+boutons à bascule en gris, et plus de bouton « Recommencer ». Le scénario de
+recette est conservé en bas de ce fichier : il sert de non-régression.
 
 ### Mise en route sur une nouvelle machine
 
@@ -34,9 +39,24 @@ Vérifier que tout passe : `.venv/bin/pytest`, `.venv/bin/ruff check src tests`,
 
 - **`data/bot.db`** — recréée au démarrage par les migrations. Elle ne contenait
   que des données de test, rien à transférer.
-- **`assets/classes/*.png` et `assets/roles/*.png`** — les icônes de classe, à
-  déposer de nouveau. Voir `assets/README.md`. Sans elles le bot utilise les
-  emojis unicode de repli de `classes.toml` : rien ne casse.
+
+Les 12 icônes sont en place dans `assets/` et versionnées. Tant qu'une icône
+manque, le bot utilise l'emoji unicode de repli de `classes.toml` : rien ne
+casse, mais `/emojis` doit être lancée pour que les vraies icônes s'affichent.
+
+### Couleur du pseudo
+
+Discord affiche la couleur du rôle **le plus haut** qui en a une. Le rôle du bot
+est sous Membre, Officier et Maître de guilde, donc les rôles de classe sont créés
+sous eux : un officier garde la couleur d'officier, sa classe ne se voit pas.
+
+Deux façons de régler ça, toutes deux à faire à la main dans les paramètres du
+serveur, le bot ne peut pas s'en charger :
+
+- retirer la couleur des rôles Membre, Officier et Maître de guilde — la couleur
+  de classe remonte alors d'elle-même, et le rang reste lisible au classement ;
+- ou remonter le rôle du bot au-dessus d'Officier, puis les rôles de classe
+  au-dessus aussi. Plus intrusif, et ça met les classes au-dessus des grades.
 
 ### État du serveur Discord
 
@@ -54,6 +74,9 @@ Vérifier que tout passe : `.venv/bin/pytest`, `.venv/bin/ruff check src tests`,
   clôture avant le 25 octobre : il faut une commande quelque part avant.
 - **Ajouter une option à un sondage déjà ouvert** ne l'ajoute pas en base : les
   options sont copiées à la création. Il faut supprimer le sondage et le rouvrir.
+- **Aucune commande d'officier n'efface les choix de quelqu'un d'autre.** Chacun
+  défait les siens en recliquant. `ClassRepo.clear_choices()` est écrite et
+  testée : il ne manque que la commande qui l'appelle, si le besoin se présente.
 
 ## Contrainte de calendrier
 
@@ -121,48 +144,85 @@ Les trois sondages à choix limité, sans propositions ni combos.
 
 Fini quand : le bot redémarre en plein sondage et les boutons fonctionnent encore.
 
-## Étape 4 — Sondage classe et rôle
+## Étape 4 — Déclaration de classe et de rôle
 
-Le plus délicat : combos, boutons, attribution de rôle.
+Le plus délicat : deux tableaux vivants, des boutons à bascule, attribution de rôle.
 
-Énoncé révisé en cours d'étape : les menus déroulants sont devenus des boutons,
-et le couple « principal + rerolls » un classement par préférence.
+Énoncé révisé plusieurs fois en cours d'étape. Les menus déroulants sont devenus
+des boutons. Puis le classement par préférence a été séparé en deux messages :
+le personnage principal d'un côté, les classes encore en réflexion pour ce même
+personnage de l'autre — ce ne sont pas des personnages secondaires, mais une
+liste courte de candidats non tranchés. Chacun a son tableau en colonnes
+Tank / Soigneur / DPS.
 
-- [ ] Boutons de classe, puis boutons de rôle filtrés selon la classe
-- [ ] Trois choix classés par préférence, dans member_choices
-- [ ] Le choix ① donne le rôle Discord, les suivants ne changent pas la couleur
-- [ ] Bouton « Recommencer » pour tout réinitialiser
-- [ ] Icônes de classe et de rôle en emojis d'application, via `/emojis`
-- [ ] Création des rôles Discord de classe, colorés, non séparés
-- [ ] Récupération d'un rôle existant de même nom, sans doublon
-- [ ] Vérification de la hiérarchie avant `add_roles`, message clair si échec
-- [ ] `/composition` : répartition tanks / heals / dps
-- [ ] `/annuaire` : message public tenu à jour à chaque déclaration
+Les boutons **restent gris**, pour tout le monde. Le style d'un bouton appartient
+au message, et un message de salon est le même pour tous : une couleur y
+montrerait le dernier qui a cliqué, pas celui qui regarde. Le retour visuel est
+le tableau juste au-dessus, où le pseudo entre et sort d'une colonne en direct.
 
-Fini quand : voter mage donne le rôle Mage et le pseudo devient bleu clair.
+Un clic ne produit **qu'un seul message éphémère** : la question du rôle, une
+erreur, ou une confirmation. La question du rôle devient sa propre confirmation
+au lieu d'en empiler une seconde, et tout message terminal s'efface au bout de
+30 secondes.
 
-### Test manuel à faire à la reprise
+- [x] Deux messages suivis : « Composition au lancement » et « Autres classes
+      envisagées au lancement »
+- [x] Chaque encart répartit les pseudos en colonnes Tank / Soigneur / DPS, avec
+      l'icône de classe devant chaque nom
+- [x] Un bouton par classe sous chaque message, icône **et** nom, gris
+- [x] Encart 1 : cliquer déclare la principale, recliquer la retire avec sa
+      couleur, cliquer une autre la remplace
+- [x] Encart 2 : cliquer ajoute, recliquer retire, refus si la classe est déjà la
+      principale, refus si les deux places sont prises
+- [x] Refus vérifiés **avant** la question du rôle, pour ne pas la poser pour rien
+- [x] Étape du rôle sautée quand la classe n'en a qu'un seul
+- [x] Un seul éphémère par clic, effacé au bout de 30 secondes
+- [x] Icônes de classe et de rôle en emojis d'application, via `/emojis`
+- [x] Création des rôles Discord de classe, colorés, non séparés
+- [x] Récupération d'un rôle existant de même nom, sans doublon
+- [x] Vérification de la hiérarchie avant `add_roles`, message clair si échec
+- [x] `/composition` : répartition tanks / heals / dps
 
-Déposer d'abord les icônes dans `assets/`, puis lancer le bot.
+Fini quand : Mage cliqué sous le premier message donne le rôle Mage, colore le
+pseudo en bleu clair et fait apparaître le nom dans la colonne DPS ; recliquer
+Mage défait tout.
 
-| # | Action | Attendu |
-|---|---|---|
-| 1 | `/emojis` | « Envoyées (12) », ou la liste de ce qui manque |
-| 2 | `/roles-classes` | **« Récupérés (9) »**, pas « Créés » : les rôles existent déjà |
-| 3 | `/classes` dans #rôles | 9 classes en colonnes, 9 boutons + « Recommencer » |
-| 4 | `/annuaire` | Annuaire vide posté |
-| 5 | Bouton Mage → DPS | « Choix n° ① », pseudo bleu clair, annuaire mis à jour |
-| 6 | Bouton Druide → Tank | « Choix n° ② », pseudo **toujours** bleu clair |
-| 7 | Bouton Prêtre → Soigneur | « Choix n° ③ » |
-| 8 | Un 4ᵉ choix | « Tu as déjà fait tes 3 choix » |
-| 9 | « Recommencer » | Choix effacés, couleur retirée, annuaire vidé |
-| 10 | `/composition` | Répartition, choix suivants comptés à part |
-| 11 | `Ctrl-C`, relancer, recliquer | Les boutons répondent encore |
+### Scénario de recette — passé le 30 septembre 2026
 
-L'étape 11 est le test décisif : rien n'est gardé en mémoire, chaque bouton est
+Déroulé en entier sur le serveur, tout est passé. Conservé comme non-régression :
+à rejouer si les boutons ou les tableaux sont retouchés.
+
+**Préalable** : retirer la couleur des rôles Membre, Officier et Maître de guilde,
+sinon les étapes 4 et 6 à 8 échouent à tort — voir « Couleur du pseudo » plus haut.
+
+| #  | Action | Attendu |
+|----|--------|---------|
+| 1  | `/emojis` | « Envoyées (12) », ou la liste de ce qui manque |
+| 2  | `/roles-classes` | **« Récupérés (9) »**, pas « Créés » : les rôles existent déjà |
+| 3  | `/classes` | **Deux** messages, 9 boutons gris chacun sur 2 rangées, icône + nom, colonnes à « — » |
+| 4  | Msg 1 → Mage | Aucune question de rôle. Confirmation seule, pseudo bleu clair, nom en colonne DPS |
+| 5  | Attendre 30 s | La confirmation disparaît toute seule |
+| 6  | Msg 1 → Mage | « retirée », pseudo redevient blanc, la colonne DPS se vide |
+| 7  | Msg 1 → Druide | « Druide — quel rôle ? ». Tank → **le même message** devient la confirmation, pseudo orange |
+| 8  | Msg 1 → Paladin → Soigneur | « Elle remplace **Druide** », une seule ligne dans le tableau |
+| 9  | Msg 2 → Prêtre → Soigneur | « ajoutée », colonne Soigneur du msg 2. **Le msg 1 ne bouge pas** |
+| 10 | Msg 2 → Voleur | Ajouté sans question de rôle |
+| 11 | Msg 2 → Chaman | « Tu as déjà 2 classes envisagées », **sans** question de rôle |
+| 12 | Msg 2 → Paladin | « est déjà ta classe principale », **sans** question de rôle |
+| 13 | Msg 2 → Voleur | « retirée », la colonne DPS du msg 2 se vide |
+| 14 | Msg 1 → Prêtre → Soigneur | Promu : quitte le msg 2, arrive dans le msg 1, **les deux** se mettent à jour |
+| 15 | `/composition` | Répartition, classes envisagées comptées à part |
+| 16 | `Ctrl-C`, relancer, recliquer sur les deux messages | Tout répond encore |
+
+L'étape 16 est le test décisif : rien n'est gardé en mémoire, chaque bouton est
 reconstruit depuis le `custom_id` inscrit dans le message.
 
-Une fois validé : cocher les cases ci-dessus, puis commit.
+Les étapes 11 et 12 vérifient que les refus arrivent avant la question du rôle.
+Les étapes 9 et 14 vérifient que seul le tableau qui a changé est réécrit, sauf
+en cas de promotion où les deux le sont.
+
+Reste ouvert, hors étape : `/classes` relancée poste deux nouveaux messages et
+fige les anciens, qui gardent des boutons actifs. À supprimer à la main.
 
 ## Étape 5 — Sondage nom de guilde
 

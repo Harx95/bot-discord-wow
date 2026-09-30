@@ -1,18 +1,20 @@
 """Bot client: intents, cog loading and command syncing."""
 
 import logging
+from collections.abc import Sequence
 
 import aiosqlite
 import discord
 from discord.ext import commands
 
-from bot.cogs.classes import DIRECTORY_KEY, Classes
+from bot.boards import BOARD_BUILDERS
+from bot.cogs.classes import Classes
 from bot.cogs.general import General
 from bot.cogs.polls import Polls
 from bot.emojis import EmojiStore
-from bot.rendering import directory_embed
+from bot.rendering import Declaration, alternates_board_embed, main_board_embed
 from bot.tree import GuildCommandTree
-from bot.views.classes import ClassButton, ResetButton, RoleButton
+from bot.views.classes import AlternateClassButton, MainClassButton, RoleButton
 from bot.views.poll import VoteButton
 from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
 from db import ClassRepo, apply_migrations, connect
@@ -69,7 +71,12 @@ class GuildBot(commands.Bot):
 
         # Registered once, for every poll: discord.py rebuilds each button from the
         # custom_id stored on the message, so nothing has to be re-registered per poll.
-        self.add_dynamic_items(VoteButton, ClassButton, RoleButton, ResetButton)
+        self.add_dynamic_items(
+            VoteButton,
+            MainClassButton,
+            AlternateClassButton,
+            RoleButton,
+        )
 
         await self.add_cog(General(self))
         await self.add_cog(Polls(self))
@@ -82,36 +89,58 @@ class GuildBot(commands.Bot):
         synced = await self.tree.sync(guild=guild)
         _log.info("Synced %d command(s) to guild %d", len(synced), guild.id)
 
-    async def directory_embed(self) -> discord.Embed:
-        """The directory as it stands right now."""
-        entries = await ClassRepo(self.db).directory()
-        return directory_embed(self.classes, self.emojis_store, entries)
+    async def board_embeds(self) -> tuple[discord.Embed, discord.Embed]:
+        """Both boards as they stand right now, main characters first."""
+        rows = await ClassRepo(self.db).declarations()
+        return (
+            main_board_embed(self.classes, self.emojis_store, rows),
+            alternates_board_embed(self.classes, self.emojis_store, rows),
+        )
 
-    async def refresh_directory(self) -> None:
-        """Rewrite the directory message, if one was posted.
+    async def refresh_board(self, *keys: str) -> None:
+        """Rewrite the boards that changed, if they were posted.
+
+        Only the boards named are edited: a click on an alternate leaves the main board
+        untouched, which halves the API traffic in the common case.
+        """
+        if not keys:
+            return
+
+        classes = ClassRepo(self.db)
+        rows = await classes.declarations()
+        for key in keys:
+            await self._rewrite_board(classes, key, rows)
+
+    async def _rewrite_board(
+        self,
+        classes: ClassRepo,
+        key: str,
+        rows: Sequence[Declaration],
+    ) -> None:
+        """Edit one board message.
 
         Failures are logged and swallowed: a member declaring their class must not see an
-        error because an officer deleted the directory message.
+        error because an officer deleted a board message.
         """
-        classes = ClassRepo(self.db)
-        managed = await classes.managed_message(DIRECTORY_KEY)
+        managed = await classes.managed_message(key)
         if managed is None:
             return
 
         channel = self.get_channel(managed.channel_id)
         if not isinstance(channel, discord.TextChannel | discord.Thread):
-            _log.warning("Directory channel %d is gone", managed.channel_id)
-            await classes.forget_message(DIRECTORY_KEY)
+            _log.warning("Channel %d of board %r is gone", managed.channel_id, key)
+            await classes.forget_message(key)
             return
 
+        embed = BOARD_BUILDERS[key](self.classes, self.emojis_store, rows)
         try:
             message = await channel.fetch_message(managed.message_id)
-            await message.edit(embed=await self.directory_embed())
+            await message.edit(embed=embed)
         except discord.NotFound:
-            _log.info("Directory message was deleted; forgetting it")
-            await classes.forget_message(DIRECTORY_KEY)
+            _log.info("Board %r was deleted; forgetting it", key)
+            await classes.forget_message(key)
         except discord.HTTPException as error:
-            _log.warning("Could not refresh the directory: %s", error)
+            _log.warning("Could not refresh board %r: %s", key, error)
 
     async def close(self) -> None:
         """Close the database alongside the Discord connection."""

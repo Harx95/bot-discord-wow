@@ -1,4 +1,4 @@
-"""ClassRepo behaviour: ranked choices, class roles and managed messages."""
+"""ClassRepo behaviour: main characters, alternates, class roles and managed messages."""
 
 import aiosqlite
 
@@ -7,133 +7,280 @@ from db import ClassRepo, MemberRepo
 MAX = 3
 
 
-async def test_the_first_choice_lands_at_rank_one(
+async def _member(members: MemberRepo, member_id: int = 1, name: str = "Kaeldin") -> None:
+    """member_choices references members, so one has to exist first."""
+    await members.upsert(member_id, name)
+
+
+# --- the main character ---------------------------------------------------------------
+
+
+async def test_the_main_character_lands_at_rank_one(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
+    await _member(members)
 
-    choice = await class_repo.append_choice(1, "mage", "dps", MAX)
+    update = await class_repo.set_main(1, "mage", "dps")
 
-    assert choice is not None
-    assert choice.rank == 1
-    assert choice.is_first
+    assert update.changed
+    assert update.choice.rank == 1
+    assert update.choice.is_first
 
 
-async def test_choices_stack_in_the_order_they_are_made(
+async def test_a_new_main_replaces_the_previous_one(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
+    """The old main is dropped, not demoted: the member said they changed their mind."""
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
 
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.append_choice(1, "druide", "tank", MAX)
-    third = await class_repo.append_choice(1, "pretre", "heal", MAX)
+    update = await class_repo.set_main(1, "paladin", "tank")
 
-    assert third is not None
-    assert third.rank == 3
-    assert [c.class_key for c in await class_repo.choices_of(1)] == ["mage", "druide", "pretre"]
+    assert update.replaced_class_key == "mage"
+    assert [c.class_key for c in await class_repo.choices_of(1)] == ["paladin"]
 
 
-async def test_a_fourth_choice_is_refused_rather_than_dropped(
+async def test_declaring_the_same_main_twice_changes_nothing(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    """Returning None lets the caller explain, instead of silently ignoring the click."""
-    await members.upsert(1, "Kaeldin")
-    for klass, role in (("mage", "dps"), ("druide", "tank"), ("pretre", "heal")):
-        await class_repo.append_choice(1, klass, role, MAX)
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
 
-    assert await class_repo.append_choice(1, "voleur", "dps", MAX) is None
-    assert len(await class_repo.choices_of(1)) == MAX
+    update = await class_repo.set_main(1, "mage", "dps")
 
-
-async def test_picking_the_same_pair_twice_does_not_take_a_second_rank(
-    members: MemberRepo,
-    class_repo: ClassRepo,
-) -> None:
-    await members.upsert(1, "Kaeldin")
-    first = await class_repo.append_choice(1, "mage", "dps", MAX)
-
-    again = await class_repo.append_choice(1, "mage", "dps", MAX)
-
-    assert again is not None and first is not None
-    assert again.rank == first.rank
+    assert not update.changed
+    assert update.replaced_class_key is None
     assert len(await class_repo.choices_of(1)) == 1
 
 
-async def test_the_same_class_in_another_role_is_a_separate_choice(
+async def test_an_alternate_promoted_to_main_is_not_duplicated(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    """Druide tank and druide heal are two different characters to plan for."""
-    await members.upsert(1, "Kaeldin")
-    await class_repo.append_choice(1, "druide", "tank", MAX)
+    """UNIQUE (member, class, role) forbids holding the pair twice."""
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
 
-    second = await class_repo.append_choice(1, "druide", "heal", MAX)
+    update = await class_repo.set_main(1, "druide", "tank")
 
-    assert second is not None
-    assert second.rank == 2
+    assert update.promoted
+    assert [(c.rank, c.class_key) for c in await class_repo.choices_of(1)] == [(1, "druide")]
 
 
-async def test_first_choice_of_returns_the_main(
+async def test_a_main_declared_from_nothing_is_not_a_promotion(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.append_choice(1, "druide", "tank", MAX)
+    await _member(members)
 
-    first = await class_repo.first_choice_of(1)
+    update = await class_repo.set_main(1, "mage", "dps")
 
-    assert first is not None
-    assert first.class_key == "mage"
+    assert not update.promoted
 
 
-async def test_first_choice_of_is_none_before_anything_is_declared(
-    class_repo: ClassRepo,
-) -> None:
-    assert await class_repo.first_choice_of(1) is None
-
-
-async def test_clear_choices_reports_how_many_were_removed(
+async def test_the_same_class_in_another_role_replaces_the_main(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.append_choice(1, "druide", "tank", MAX)
+    """Switching from druid tank to druid healer is still one main character."""
+    await _member(members)
+    await class_repo.set_main(1, "druide", "tank")
 
-    assert await class_repo.clear_choices(1) == 2
-    assert await class_repo.clear_choices(1) == 0
+    await class_repo.set_main(1, "druide", "heal")
+
+    choices = await class_repo.choices_of(1)
+    assert [(c.class_key, c.role_key) for c in choices] == [("druide", "heal")]
 
 
-async def test_ranks_restart_at_one_after_a_reset(
+# --- taking the main character back ---------------------------------------------------
+
+
+async def test_clear_main_returns_what_it_removed(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    """Otherwise the primary key would collide on the second pass."""
-    await members.upsert(1, "Kaeldin")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.clear_choices(1)
+    """Clicking the declared class again is how a member drops it."""
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
 
-    choice = await class_repo.append_choice(1, "druide", "tank", MAX)
+    removed = await class_repo.clear_main(1)
 
-    assert choice is not None
-    assert choice.rank == 1
+    assert removed is not None
+    assert removed.class_key == "mage"
+    assert await class_repo.main_of(1) is None
+
+
+async def test_clearing_a_main_that_was_never_set_is_harmless(class_repo: ClassRepo) -> None:
+    assert await class_repo.clear_main(1) is None
+
+
+async def test_clearing_the_main_leaves_the_alternates_alone(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+
+    await class_repo.clear_main(1)
+
+    assert [c.class_key for c in await class_repo.alternates_of(1)] == ["druide"]
+
+
+async def test_a_main_can_be_declared_again_after_being_cleared(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    """Rank 1 has to be free again, or the primary key would collide."""
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.clear_main(1)
+
+    update = await class_repo.set_main(1, "pretre", "heal")
+
+    assert update.choice.rank == 1
+    assert update.replaced_class_key is None
+
+
+# --- the alternates -------------------------------------------------------------------
+
+
+async def test_alternates_start_after_the_main_rank(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+
+    assert await class_repo.add_alternate(1, "druide", "tank", MAX) is not None
+    assert await class_repo.add_alternate(1, "pretre", "heal", MAX) is not None
+    assert [c.rank for c in await class_repo.choices_of(1)] == [1, 2, 3]
+
+
+async def test_a_third_alternate_is_refused(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+    await class_repo.add_alternate(1, "pretre", "heal", MAX)
+
+    assert await class_repo.add_alternate(1, "voleur", "dps", MAX) is None
+    assert len(await class_repo.alternates_of(1)) == 2
+
+
+async def test_alternates_without_a_main_leave_rank_one_free(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    """Declaring alternates first must not steal the rank the main character owns."""
+    await _member(members)
+
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+
+    assert [c.rank for c in await class_repo.choices_of(1)] == [2]
+    assert await class_repo.main_of(1) is None
+
+
+async def test_an_alternate_is_found_by_class_whatever_its_role(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    """A button names a class; it cannot say which role was picked behind it."""
+    await _member(members)
+    await class_repo.add_alternate(1, "druide", "heal", MAX)
+
+    found = await class_repo.alternate_of(1, "druide")
+
+    assert found is not None
+    assert found.role_key == "heal"
+
+
+async def test_the_main_character_is_not_found_among_the_alternates(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+
+    assert await class_repo.alternate_of(1, "mage") is None
+    assert await class_repo.alternates_of(1) == []
+
+
+async def test_remove_alternate_reports_what_it_removed(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+
+    removed = await class_repo.remove_alternate(1, "druide")
+
+    assert removed is not None
+    assert removed.class_key == "druide"
+    assert await class_repo.alternates_of(1) == []
+
+
+async def test_removing_an_alternate_that_is_not_listed_is_harmless(
+    class_repo: ClassRepo,
+) -> None:
+    assert await class_repo.remove_alternate(1, "druide") is None
+
+
+async def test_removing_an_alternate_never_touches_the_main(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+
+    assert await class_repo.remove_alternate(1, "mage") is None
+    assert await class_repo.main_of(1) is not None
+
+
+async def test_a_freed_alternate_rank_is_reused(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    """Otherwise the primary key would collide once every rank had been used."""
+    await _member(members)
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+    await class_repo.add_alternate(1, "pretre", "heal", MAX)
+    await class_repo.remove_alternate(1, "druide")
+
+    assert await class_repo.add_alternate(1, "voleur", "dps", MAX) is not None
+    choices = await class_repo.choices_of(1)
+    assert [(c.rank, c.class_key) for c in choices] == [(2, "voleur"), (3, "pretre")]
 
 
 async def test_choices_are_scoped_to_their_member(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
-    await members.upsert(2, "Sylvara")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.append_choice(2, "druide", "tank", MAX)
+    await _member(members, 1, "Kaeldin")
+    await _member(members, 2, "Sylvara")
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.set_main(2, "druide", "tank")
 
     assert [c.class_key for c in await class_repo.choices_of(1)] == ["mage"]
     assert len(await class_repo.all_choices()) == 2
+
+
+async def test_clear_choices_reports_how_many_were_removed(
+    members: MemberRepo,
+    class_repo: ClassRepo,
+) -> None:
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+
+    assert await class_repo.clear_choices(1) == 2
+    assert await class_repo.clear_choices(1) == 0
 
 
 async def test_deleting_a_member_takes_their_choices_along(
@@ -141,8 +288,8 @@ async def test_deleting_a_member_takes_their_choices_along(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
+    await _member(members)
+    await class_repo.set_main(1, "mage", "dps")
 
     await connection.execute("DELETE FROM members WHERE discord_id = 1")
     await connection.commit()
@@ -150,46 +297,49 @@ async def test_deleting_a_member_takes_their_choices_along(
     assert await class_repo.all_choices() == []
 
 
-# --- directory -----------------------------------------------------------------------
+# --- declarations ---------------------------------------------------------------------
 
 
-async def test_the_directory_groups_choices_by_member(
+async def test_declarations_give_one_row_per_character(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
-    await members.upsert(2, "Sylvara")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.append_choice(1, "druide", "tank", MAX)
-    await class_repo.append_choice(2, "pretre", "heal", MAX)
+    await _member(members, 1, "Kaeldin")
+    await _member(members, 2, "Sylvara")
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.add_alternate(1, "druide", "tank", MAX)
+    await class_repo.set_main(2, "pretre", "heal")
 
-    entries = await class_repo.directory()
+    rows = await class_repo.declarations()
 
-    assert [name for name, _ in entries] == ["Kaeldin", "Sylvara"]
-    assert [c.rank for c in entries[0][1]] == [1, 2]
+    assert [(name, choice.class_key) for name, choice in rows] == [
+        ("Kaeldin", "mage"),
+        ("Kaeldin", "druide"),
+        ("Sylvara", "pretre"),
+    ]
 
 
-async def test_the_directory_ignores_members_who_declared_nothing(
+async def test_declarations_ignore_members_who_declared_nothing(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "Kaeldin")
-    await members.upsert(2, "Sylvara")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
+    await _member(members, 1, "Kaeldin")
+    await _member(members, 2, "Sylvara")
+    await class_repo.set_main(1, "mage", "dps")
 
-    assert [name for name, _ in await class_repo.directory()] == ["Kaeldin"]
+    assert [name for name, _ in await class_repo.declarations()] == ["Kaeldin"]
 
 
-async def test_the_directory_sorts_names_regardless_of_case(
+async def test_declarations_sort_names_regardless_of_case(
     members: MemberRepo,
     class_repo: ClassRepo,
 ) -> None:
-    await members.upsert(1, "zorg")
-    await members.upsert(2, "Aelis")
-    await class_repo.append_choice(1, "mage", "dps", MAX)
-    await class_repo.append_choice(2, "druide", "tank", MAX)
+    await _member(members, 1, "zorg")
+    await _member(members, 2, "Aelis")
+    await class_repo.set_main(1, "mage", "dps")
+    await class_repo.set_main(2, "druide", "tank")
 
-    assert [name for name, _ in await class_repo.directory()] == ["Aelis", "zorg"]
+    assert [name for name, _ in await class_repo.declarations()] == ["Aelis", "zorg"]
 
 
 # --- class roles ---------------------------------------------------------------------
@@ -221,20 +371,32 @@ async def test_unlink_role_reports_whether_it_existed(class_repo: ClassRepo) -> 
 
 
 async def test_a_managed_message_is_remembered(class_repo: ClassRepo) -> None:
-    await class_repo.remember_message("annuaire", 10, 20)
+    await class_repo.remember_message("board", 10, 20)
 
-    managed = await class_repo.managed_message("annuaire")
+    managed = await class_repo.managed_message("board")
 
     assert managed is not None
     assert (managed.channel_id, managed.message_id) == (10, 20)
 
 
+async def test_two_boards_are_remembered_separately(class_repo: ClassRepo) -> None:
+    """The two messages are edited independently, so neither may overwrite the other."""
+    await class_repo.remember_message("board_main", 10, 20)
+    await class_repo.remember_message("board_alt", 10, 21)
+
+    main = await class_repo.managed_message("board_main")
+    alternates = await class_repo.managed_message("board_alt")
+
+    assert main is not None and alternates is not None
+    assert main.message_id != alternates.message_id
+
+
 async def test_reposting_replaces_the_remembered_message(class_repo: ClassRepo) -> None:
-    await class_repo.remember_message("annuaire", 10, 20)
+    await class_repo.remember_message("board", 10, 20)
 
-    await class_repo.remember_message("annuaire", 11, 21)
+    await class_repo.remember_message("board", 11, 21)
 
-    managed = await class_repo.managed_message("annuaire")
+    managed = await class_repo.managed_message("board")
     assert managed is not None
     assert (managed.channel_id, managed.message_id) == (11, 21)
 
@@ -244,7 +406,7 @@ async def test_an_unknown_managed_message_is_none(class_repo: ClassRepo) -> None
 
 
 async def test_forget_message_reports_whether_it_existed(class_repo: ClassRepo) -> None:
-    await class_repo.remember_message("annuaire", 10, 20)
+    await class_repo.remember_message("board", 10, 20)
 
-    assert await class_repo.forget_message("annuaire") is True
-    assert await class_repo.forget_message("annuaire") is False
+    assert await class_repo.forget_message("board") is True
+    assert await class_repo.forget_message("board") is False
