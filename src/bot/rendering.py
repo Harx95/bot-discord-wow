@@ -88,17 +88,15 @@ Declaration = tuple[str, MemberChoice]
 MAIN_BOARD_TITLE = "Composition au lancement"
 ALTERNATES_BOARD_TITLE = "Autres classes envisagées au lancement"
 
-HEADING = "### "
-
 MAIN_BOARD_INTRO = (
-    f"{HEADING}Le personnage que tu comptes jouer au lancement.\n"
-    f"{HEADING}Il te donne le rôle Discord de la classe et colore ton pseudo.\n"
-    f"{HEADING}Clique sur ta classe, reclique dessus pour la retirer."
+    "Le personnage que tu comptes jouer au lancement : il te donne le rôle Discord de la "
+    "classe et colore ton pseudo.\n"
+    "Clique sur ta classe, reclique dessus pour la retirer."
 )
 ALTERNATES_BOARD_INTRO = (
-    f"{HEADING}Les autres classes auxquelles tu réfléchis pour ton personnage "
-    "principal, sans avoir encore tranché.\n"
-    f"{HEADING}{{max}} au maximum. Clique pour en ajouter une, reclique pour la retirer."
+    "Les autres classes auxquelles tu réfléchis pour ton personnage principal, sans avoir "
+    "encore tranché — **{max} au maximum**.\n"
+    "Clique pour en ajouter une, reclique dessus pour la retirer."
 )
 
 MAIN_BOARD_EMPTY = "Personne n'a encore déclaré de personnage principal."
