@@ -3,18 +3,18 @@
 Une étape à la fois. Ne pas anticiper les suivantes.
 Chaque étape se termine par : test manuel réussi, puis commit, puis rendu d'explication technique court et concis.
 
-## Où on en est — 30 septembre 2026
+## Où on en est — 1er octobre 2026
 
-Étapes 1 à 4bis terminées, testées sur le serveur et commitées. Les trois
-sondages structurants peuvent donc être clos dès que tu as tranché ; l'échéance
-du 25 octobre n'est plus bloquée par le code.
+Étapes 1 à 4bis terminées, testées sur le serveur et commitées.
 
-L'**étape 4ter** est écrite mais **pas encore testée sur le serveur** : le vote
-passe des boutons aux réactions. Son scénario de recette est en bas de ce
-fichier, à dérouler avant de commiter.
+Deux étapes sont écrites mais **pas encore testées sur le serveur** :
+l'**étape 4ter**, qui fait passer le vote des boutons aux réactions, et
+l'**étape 5**, le sondage du nom de guilde. Leurs deux scénarios de recette sont
+en bas de ce fichier, à dérouler avant de commiter.
 
-**Ensuite : l'étape 5**, le sondage du nom de guilde. Elle amène les modales,
-sur lesquelles se greffera la commande de création de sondage à la volée.
+Côté échéances, le code ne bloque plus rien : les trois sondages peuvent être
+clos dès que tu as tranché. L'étape 5 a aussi amené les modales, sur lesquelles
+se greffera la commande de création de sondage à la volée.
 
 L'étape 4 a été remaniée le 30 septembre, après un premier jet : deux messages
 au lieu d'un, chacun avec son tableau en colonnes Tank / Soigneur / DPS, des
@@ -382,19 +382,82 @@ Vote ouvert avec propositions des membres.
 
 **Le vote par réaction ne convient pas à cette étape** : un message plafonne à
 20 réactions distinctes, et un nom proposé par un membre n'a pas d'emoji à lui.
-Il faudra donc réintroduire un vote à boutons ou à menu déroulant pour ce
-sondage-là, à côté des réactions que gardent les deux autres. La couche base et
-`/clore` ne bougent pas, seul l'affichage du vote change.
+Le vote se fait donc dans un menu déroulant sous le message, à côté des réactions
+que gardent les deux autres sondages.
 
-- [ ] Bouton « Proposer un nom » ouvrant une modale
-- [ ] Validation : longueur, doublons, caractères autorisés
-- [ ] Limite de propositions par personne
-- [ ] Vote sur toutes les options, y compris ajoutées
-- [ ] Réintroduire un vote à boutons ou menu, propre à ce sondage
-- [ ] Gestion du dépassement de 25 options (pagination ou tri)
-- [ ] Un officier peut supprimer une proposition
+La prévision « la couche base et `/clore` ne bougent pas » était fausse. Ce que
+l'étape a réellement changé :
+
+- **Un sondage a désormais deux bulletins possibles.** Un bloc
+  `[polls.proposals]` dans `polls.toml` remplace les options configurées et fait
+  basculer le sondage sur le menu. `votes_by_reaction` pilote le reste : les
+  permissions demandées, le gel à la clôture, et surtout la réconciliation.
+- **La réconciliation devait être bornée.** Elle reconstruit les votes depuis les
+  réactions du message ; lancée sur un sondage à menu, elle n'aurait trouvé
+  aucune réaction et aurait effacé toutes les voix. Elle saute ces sondages.
+- **Trois voix par personne, plafonnées par Discord lui-même** : `max_values = 3`
+  sur le menu, donc la limite est tenue côté client. `set_votes` remplace d'un
+  bloc les voix d'un membre, ce qui est exactement la forme de ce qu'un menu
+  soumet — une sélection complète, pas un delta.
+- **Les voix ne disent plus la participation**, d'où « 13 voix de 5
+  participants » en pied et un `COUNT(DISTINCT member_id)` pour l'obtenir.
+- **Dépassement des 25 options : la 26ᵉ proposition est refusée.** Paginer
+  cacherait une proposition neuve à ceux qui doivent voter dessus, et trier par
+  popularité la rendrait invisible, une proposition neuve étant à zéro voix. Un
+  officier retire un nom pour faire de la place.
+- **La modale n'est pas persistante** et ne peut pas l'être : elle n'appartient à
+  aucun message, donc rien ne peut la reconstruire. C'est le bouton qui l'ouvre
+  qui survit au redémarrage ; une modale laissée ouverte pendant un redémarrage
+  échoue à l'envoi et coûte un second clic.
+- **`TextInput(label=...)` est déprécié depuis discord.py 2.6** au profit de
+  `ui.Label`, qui enveloppe le champ et affiche les règles juste en dessous.
+
+- [x] Bouton « Proposer un nom » ouvrant une modale
+- [x] Validation : longueur, caractères autorisés, doublons insensibles à la
+      casse et aux accents — « Les Loups » et « les loups » ont la même clé
+- [x] Limite de propositions par personne : 2, configurable
+- [x] Vote sur toutes les options, y compris ajoutées
+- [x] Vote par menu propre à ce sondage, 3 voix par personne
+- [x] Dépassement de 25 options : proposition refusée, menu plafonné de toute façon
+- [x] `/retirer-proposition`, réservée à GM et Officier, l'auteur en autocomplétion
+- [ ] **Recette sur le serveur** — voir le scénario ci-dessous
 
 Fini quand : un membre propose un nom, il apparaît, les autres peuvent voter.
+
+### Scénario de recette — à dérouler
+
+Ce sondage ne demande que « Envoyer des messages », « Intégrer des liens » et
+« Voir les anciens messages » : rien ne pose de réaction dessus, donc rien n'a
+à en retirer.
+
+| #  | Action | Attendu |
+|----|--------|---------|
+| 1  | `/sondage clé:nom_guilde` | Message posté avec le bouton « Proposer un nom » seul : **pas de menu**, il n'y a rien à voter |
+| 2  | « Proposer un nom », écrire « Les Loups de Pierre » | Confirmation en éphémère, le nom apparaît à 0 voix **et le menu apparaît** |
+| 3  | Proposer « les loups de pierre » | Refusé : déjà en lice. La casse et les accents ne font pas un nom différent |
+| 4  | Proposer « Ab » | Refusé par Discord **avant l'envoi** : le champ exige 3 caractères |
+| 5  | Proposer « Nom 2 » | Refusé : pas de chiffre dans un nom de guilde |
+| 6  | Proposer un 2ᵉ nom valide, puis tenter un 3ᵉ | Le 3ᵉ est refusé : limite de 2 propositions, les deux déjà proposés sont rappelés |
+| 7  | Choisir un nom dans le menu | « Tes voix vont à … », compteur à 1, pied « 1 voix de 1 participant(s) » |
+| 8  | Rouvrir le menu, choisir **deux** noms | Les voix sont **remplacées**, pas ajoutées : 2 voix au total pour ce membre |
+| 9  | Tenter d'en sélectionner 4 | Impossible : Discord bloque la 4ᵉ sélection, le bot n'est pas sollicité |
+| 10 | « Retirer mes voix » | « Tes voix sont retirées », les compteurs retombent |
+| 11 | « Retirer mes voix » encore | « Tu n'avais pas encore voté », rien ne bouge |
+| 12 | `Ctrl-C`, relancer, voter dans le menu | Le vote marche : le menu est reconstruit depuis son `custom_id`, et la sélection arrive bien dans la charge utile |
+| 13 | Comparer les compteurs avant / après ce redémarrage | **Identiques.** C'est le point décisif : la réconciliation ne doit pas avoir touché ce sondage |
+| 14 | Réagir avec n'importe quel emoji sous le message | La réaction **reste** : ce sondage ne vote pas par réaction, donc le bot l'ignore au lieu de la retirer |
+| 15 | `/retirer-proposition`, choisir un nom qui a des voix | Il disparaît de l'embed et du menu, ses voix avec, et le nombre de voix perdues est annoncé |
+| 16 | `/resultats clé:nom_guilde` | Classement cohérent, « N voix de M participant(s) » |
+| 17 | `/clore clé:nom_guilde` → confirmer | Message en gris, « Sondage clos. », **plus aucun composant** |
+| 18 | Cliquer le menu sur le message clos | Rien n'est enregistré ; si le gel a échoué, « Ce sondage est clos » |
+| 19 | `/sondage clé:nom_guilde` | Refusé : un sondage clos ne se réaffiche pas |
+
+Les étapes 12 et 13 sont les décisives, et elles sont indissociables : la
+première vérifie que la persistance des composants fonctionne, la seconde qu'elle
+ne s'accompagne pas d'un effacement silencieux des voix au démarrage.
+
+L'étape 9 vérifie une limite tenue par Discord, pas par le bot — c'est pour ça
+qu'elle vaut d'être vue au moins une fois.
 
 ## Étape 6 — Métiers et annuaire
 

@@ -283,3 +283,207 @@ async def test_results_ignore_votes_from_other_polls(
     await polls.cast_vote(realm.id, 1, (await polls.options(realm.id))[0].id)
 
     assert [t.votes for t in await polls.results(faction.id)] == [0, 0]
+
+
+# --- polls whose options the members write -------------------------------------------
+
+
+async def test_propose_option_appends_a_member_proposal(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("nom_guilde", "Quel nom ?")
+
+    proposed = await polls.propose_option(poll.id, "les_loups", "Les Loups", 1)
+
+    assert proposed is not None
+    assert proposed.label == "Les Loups"
+    assert proposed.created_by == 1
+    assert proposed.is_member_proposal
+    assert [o.key for o in await polls.options(poll.id)] == ["les_loups"]
+
+
+async def test_propose_option_refuses_a_key_already_taken(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """The constraint that cannot be raced: two members submitting one name at once."""
+    await members.upsert(1, "Kaeldin")
+    await members.upsert(2, "Sylvara")
+    poll = await polls.create("nom_guilde", "Quel nom ?")
+    await polls.propose_option(poll.id, "les_loups", "Les Loups", 1)
+
+    assert await polls.propose_option(poll.id, "les_loups", "les loups", 2) is None
+    assert len(await polls.options(poll.id)) == 1
+
+
+async def test_proposals_of_counts_only_what_that_member_wrote(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    await members.upsert(2, "Sylvara")
+    poll = await polls.create("nom_guilde", "Quel nom ?")
+    await polls.propose_option(poll.id, "a", "A", 1)
+    await polls.propose_option(poll.id, "b", "B", 2)
+    await polls.propose_option(poll.id, "c", "C", 1)
+
+    assert [o.key for o in await polls.proposals_of(poll.id, 1)] == ["a", "c"]
+
+
+async def test_a_configured_option_belongs_to_nobody(polls: PollRepo) -> None:
+    """Only member proposals count against a member's limit, so authorship must differ."""
+    poll = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    alliance, _ = await polls.options(poll.id)
+
+    assert alliance.created_by is None
+    assert not alliance.is_member_proposal
+    assert await polls.proposals_of(poll.id, 1) == []
+
+
+async def test_option_by_key_finds_one_option_of_one_poll(polls: PollRepo) -> None:
+    faction = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    other = await polls.create("nom_guilde", "Quel nom ?", [("alliance", "Homonyme")])
+
+    found = await polls.option_by_key(faction.id, "alliance")
+
+    assert found is not None
+    assert found.poll_id == faction.id
+    assert await polls.option_by_key(other.id, "horde") is None
+
+
+async def test_delete_option_takes_its_votes_with_it(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """Removing a proposal must not leave votes pointing at a name nobody can see."""
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("nom_guilde", "Quel nom ?")
+    kept = await polls.propose_option(poll.id, "a", "A", 1)
+    dropped = await polls.propose_option(poll.id, "b", "B", 1)
+    assert kept is not None and dropped is not None
+    await polls.set_votes(poll.id, 1, [kept.id, dropped.id])
+
+    removed = await polls.delete_option(poll.id, "b")
+
+    assert removed is not None
+    assert removed.label == "B"
+    assert [o.key for o in await polls.options(poll.id)] == ["a"]
+    assert [v.option_id for v in await polls.votes_of(poll.id, 1)] == [kept.id]
+
+
+async def test_delete_option_reports_nothing_to_remove(polls: PollRepo) -> None:
+    poll = await polls.create("nom_guilde", "Quel nom ?")
+
+    assert await polls.delete_option(poll.id, "inconnu") is None
+
+
+# --- voting several options at once ---------------------------------------------------
+
+
+async def test_set_votes_replaces_the_whole_answer_of_a_member(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """A menu submits a complete selection, not a change to one."""
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A"), ("b", "B"), ("c", "C")])
+    a, b, c = await polls.options(poll.id)
+
+    await polls.set_votes(poll.id, 1, [a.id, b.id])
+    remaining = await polls.set_votes(poll.id, 1, [c.id])
+
+    assert [v.option_id for v in remaining] == [c.id]
+    assert [(t.option.key, t.votes) for t in await polls.results(poll.id)] == [
+        ("a", 0),
+        ("b", 0),
+        ("c", 1),
+    ]
+
+
+async def test_set_votes_leaves_everyone_else_alone(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    await members.upsert(2, "Sylvara")
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A"), ("b", "B")])
+    a, b = await polls.options(poll.id)
+    await polls.set_votes(poll.id, 1, [a.id, b.id])
+
+    await polls.set_votes(poll.id, 2, [a.id])
+
+    assert [(t.option.key, t.votes) for t in await polls.results(poll.id)] == [("a", 2), ("b", 1)]
+
+
+async def test_set_votes_with_nothing_clears_the_member(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A")])
+    a = (await polls.options(poll.id))[0]
+    await polls.set_votes(poll.id, 1, [a.id])
+
+    assert await polls.set_votes(poll.id, 1, []) == []
+
+
+async def test_a_vote_on_an_option_of_another_poll_is_refused(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """The composite foreign key is what keeps a crafted menu payload harmless."""
+    await members.upsert(1, "Kaeldin")
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A")])
+    other = await polls.create("faction", "Quelle faction ?", FACTION_OPTIONS)
+    foreign = (await polls.options(other.id))[0]
+
+    with pytest.raises(aiosqlite.IntegrityError):
+        await polls.set_votes(poll.id, 1, [foreign.id])
+
+    assert await polls.votes_of(poll.id, 1) == []
+
+
+async def test_clear_votes_drops_every_voice_of_one_member(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    await members.upsert(1, "Kaeldin")
+    await members.upsert(2, "Sylvara")
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A"), ("b", "B")])
+    a, b = await polls.options(poll.id)
+    await polls.set_votes(poll.id, 1, [a.id, b.id])
+    await polls.set_votes(poll.id, 2, [a.id])
+
+    assert await polls.clear_votes(poll.id, 1) == 2
+    assert await polls.votes_of(poll.id, 1) == []
+    assert [(t.option.key, t.votes) for t in await polls.results(poll.id)] == [("a", 1), ("b", 0)]
+
+
+async def test_clear_votes_reports_a_member_who_had_not_voted(polls: PollRepo) -> None:
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A")])
+
+    assert await polls.clear_votes(poll.id, 404) == 0
+
+
+async def test_voter_count_counts_people_rather_than_voices(
+    members: MemberRepo,
+    polls: PollRepo,
+) -> None:
+    """With three voices each, the total says nothing about turnout."""
+    await members.upsert(1, "Kaeldin")
+    await members.upsert(2, "Sylvara")
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A"), ("b", "B"), ("c", "C")])
+    a, b, c = await polls.options(poll.id)
+    await polls.set_votes(poll.id, 1, [a.id, b.id, c.id])
+    await polls.set_votes(poll.id, 2, [a.id])
+
+    assert sum(t.votes for t in await polls.results(poll.id)) == 4
+    assert await polls.voter_count(poll.id) == 2
+
+
+async def test_voter_count_is_zero_on_a_fresh_poll(polls: PollRepo) -> None:
+    poll = await polls.create("nom_guilde", "Quel nom ?", [("a", "A")])
+
+    assert await polls.voter_count(poll.id) == 0

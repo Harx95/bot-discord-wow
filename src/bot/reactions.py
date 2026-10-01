@@ -112,7 +112,12 @@ class ReactionVotes(commands.Cog):
         self.bot = bot
 
     async def _poll_of(self, message_id: int) -> tuple[Poll, PollDefinition] | None:
-        """The poll a message displays, together with its configuration."""
+        """The poll a message displays, together with its configuration.
+
+        None for a poll that does not vote by reaction: its ballot is a menu under the
+        message, and a reaction on it means nothing — not even something to take off, since
+        such a poll does not ask for « Gérer les messages ».
+        """
         poll = await PollRepo(self.bot.db).get_by_message(message_id)
         if poll is None:
             return None
@@ -120,6 +125,9 @@ class ReactionVotes(commands.Cog):
         definition = self.bot.catalog.get(poll.key)
         if definition is None:
             _log.warning("Poll %r is in the database but no longer configured", poll.key)
+            return None
+
+        if not definition.votes_by_reaction:
             return None
 
         return poll, definition
@@ -266,6 +274,10 @@ async def reconcile(bot: "GuildBot") -> None:
     Discord never replays reaction events, so anything added or removed while the bot was
     down would otherwise be invisible for good. The message is the source of truth here,
     and the database is realigned on it.
+
+    Only for the polls voted on by reaction. A poll voted on through a menu is left alone:
+    a menu click is an interaction, which either reached the database or visibly failed,
+    so there is nothing to catch up on.
     """
     polls = PollRepo(bot.db)
     members = MemberRepo(bot.db)
@@ -273,6 +285,11 @@ async def reconcile(bot: "GuildBot") -> None:
     for poll in await polls.list_open():
         definition = bot.catalog.get(poll.key)
         if definition is None:
+            continue
+
+        # Crucial: a menu poll holds its votes in the database and nowhere else. Reading
+        # its message for reactions would find none and wipe every vote it ever had.
+        if not definition.votes_by_reaction:
             continue
 
         message = await fetch_poll_message(bot, poll)

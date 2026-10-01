@@ -8,8 +8,13 @@ from config.polls import (
     CUSTOM_ID_LIMIT,
     OPTION_LABEL_LIMIT,
     REACTIONS_PER_MESSAGE,
+    SELECT_OPTIONS_LIMIT,
     PollDefinition,
+    ProposalRejection,
+    ProposalRules,
     build_close_custom_id,
+    clean_name,
+    slugify,
 )
 
 
@@ -24,7 +29,7 @@ def _poll(**overrides: object) -> dict[str, object]:
 
 def test_the_shipped_file_is_valid(catalog: PollCatalog) -> None:
     """Guards against a typo in polls.toml reaching startup."""
-    assert catalog.keys == ["faction", "royaume"]
+    assert catalog.keys == ["faction", "royaume", "nom_guilde"]
 
 
 def test_the_faction_poll_offers_the_two_factions_and_accepts_both(
@@ -46,8 +51,176 @@ def test_the_realm_poll_offers_the_two_types_and_accepts_both(catalog: PollCatal
 
 
 def test_every_structural_poll_accepts_several_answers(catalog: PollCatalog) -> None:
-    """Both pre-launch polls ask which sides suit a member, not which single one wins."""
+    """Every pre-launch poll asks which options suit a member, not which single one wins."""
     assert [p.key for p in catalog.polls if p.multiple] == catalog.keys
+
+
+# --- the two ballots -----------------------------------------------------------------
+
+
+def test_only_the_guild_name_poll_collects_its_options(catalog: PollCatalog) -> None:
+    """Which is also what moves it off reactions: a proposed name has no emoji."""
+    assert [p.key for p in catalog.polls if not p.votes_by_reaction] == ["nom_guilde"]
+
+    names = catalog.get("nom_guilde")
+    assert names is not None
+    assert names.proposals is not None
+    assert names.options == ()
+
+
+def test_the_guild_name_poll_caps_how_many_names_one_member_backs(catalog: PollCatalog) -> None:
+    names = catalog.get("nom_guilde")
+    assert names is not None
+    assert names.max_votes == 3
+
+
+def test_only_reaction_polls_are_reconciled_on_restart(catalog: PollCatalog) -> None:
+    """Reconciliation rebuilds votes from the reactions a message holds.
+
+    A menu poll keeps its votes in the database and nowhere else, so running it through
+    reconciliation would find no reaction and wipe every voice. bot.reactions.reconcile
+    skips exactly these polls; this pins down which ones they are.
+    """
+    assert [p.key for p in catalog.polls if p.votes_by_reaction] == ["faction", "royaume"]
+
+
+def test_a_reaction_poll_cannot_cap_votes() -> None:
+    """Nothing stops a member adding one reaction too many; only a menu can hold a limit."""
+    with pytest.raises(ValidationError, match="cannot cap votes"):
+        PollDefinition.model_validate(_poll(multiple=True, max_votes=2))
+
+
+def test_a_cap_needs_several_answers_to_be_allowed_at_all() -> None:
+    with pytest.raises(ValidationError, match="is single"):
+        PollDefinition.model_validate(_poll(options=[], proposals={}, max_votes=2, multiple=False))
+
+
+def test_a_poll_collecting_options_must_not_configure_any() -> None:
+    """One message cannot carry both ballots: reactions need emojis, names have none."""
+    with pytest.raises(ValidationError, match="must not configure any"):
+        PollDefinition.model_validate(_poll(proposals={}))
+
+
+def test_a_poll_with_neither_options_nor_proposals_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="no option and no proposals"):
+        PollDefinition.model_validate(_poll(options=[]))
+
+
+def test_a_cap_cannot_exceed_the_number_of_names_the_poll_holds() -> None:
+    with pytest.raises(ValidationError, match="more than the"):
+        PollDefinition.model_validate(
+            _poll(options=[], multiple=True, max_votes=5, proposals={"max_options": 4})
+        )
+
+
+def test_the_vote_limit_never_exceeds_what_the_menu_shows() -> None:
+    """A menu refuses a max_values above its own option count, so the cap is clamped."""
+    definition = PollDefinition.model_validate(
+        _poll(options=[], multiple=True, max_votes=3, proposals={})
+    )
+
+    assert [definition.vote_limit(count) for count in (0, 1, 2, 3, 10)] == [1, 1, 2, 3, 3]
+
+
+def test_a_single_answer_poll_always_allows_one_pick() -> None:
+    definition = PollDefinition.model_validate(_poll())
+
+    assert definition.vote_limit(5) == 1
+
+
+def test_every_component_of_a_poll_fits_in_a_custom_id(catalog: PollCatalog) -> None:
+    for definition in catalog.polls:
+        for custom_id in definition.custom_ids:
+            assert len(custom_id) <= CUSTOM_ID_LIMIT
+
+
+# --- what a proposed name may be -----------------------------------------------------
+
+
+def test_the_shipped_rules_are_the_ones_announced(catalog: PollCatalog) -> None:
+    names = catalog.get("nom_guilde")
+    assert names is not None and names.proposals is not None
+    assert names.proposals.max_per_member == 2
+    assert names.proposals.max_options == SELECT_OPTIONS_LIMIT
+    assert (names.proposals.min_length, names.proposals.max_length) == (3, 24)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["Les Loups de Pierre", "L'Aube Écarlate", "Garde-Fou", "Ordre", "Épée de Bois"],
+)
+def test_a_plausible_guild_name_is_accepted(name: str) -> None:
+    assert ProposalRules().rejection(name) is None
+
+
+@pytest.mark.parametrize(
+    ("name", "reason"),
+    [
+        ("", ProposalRejection.EMPTY),
+        ("Ab", ProposalRejection.TOO_SHORT),
+        ("A" * 25, ProposalRejection.TOO_LONG),
+        ("Les Loups 2", ProposalRejection.FORBIDDEN),
+        ("xX_sniper_Xx", ProposalRejection.FORBIDDEN),
+        ("<@everyone>", ProposalRejection.FORBIDDEN),
+        ("- Les Loups", ProposalRejection.FORBIDDEN),
+    ],
+)
+def test_what_a_name_may_not_be(name: str, reason: ProposalRejection) -> None:
+    assert ProposalRules().rejection(name) is reason
+
+
+def test_a_name_made_only_of_punctuation_has_no_key_to_be_stored_under() -> None:
+    """Caught as unusable rather than reaching the database with an empty key."""
+    assert slugify("...") == ""
+    assert ProposalRules(pattern=".*").rejection("...") is ProposalRejection.UNUSABLE
+
+
+def test_the_length_range_must_make_sense() -> None:
+    with pytest.raises(ValidationError, match="exceeds max_length"):
+        ProposalRules.model_validate({"min_length": 10, "max_length": 4})
+
+
+def test_an_invalid_pattern_fails_at_load_rather_than_on_a_proposal() -> None:
+    with pytest.raises(ValidationError, match="invalid proposal pattern"):
+        ProposalRules.model_validate({"pattern": "[unclosed"})
+
+
+def test_a_configured_pattern_replaces_the_default() -> None:
+    """The game is not out: the rules on guild names may still turn out to be different."""
+    rules = ProposalRules.model_validate({"pattern": r"^[A-Z]+$"})
+
+    assert rules.rejection("ABCD") is None
+    assert rules.rejection("Abcd") is ProposalRejection.FORBIDDEN
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  Les Loups  ", "Les Loups"),
+        ("Les  Loups", "Les Loups"),
+        ("Les\tLoups", "Les Loups"),
+        ("Les\nLoups", "Les Loups"),
+    ],
+)
+def test_a_name_is_stored_with_its_whitespace_collapsed(raw: str, expected: str) -> None:
+    """Two spaces between two words mean one, and the label is what everyone then reads."""
+    assert clean_name(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        ("Les Loups", "les_loups"),
+        ("les loups", "les_loups"),
+        ("LES LOUPS", "les_loups"),
+        ("Lès Loups", "les_loups"),
+        ("L'Aube Écarlate", "l_aube_ecarlate"),
+        ("Garde-Fou", "garde_fou"),
+    ],
+)
+def test_names_that_differ_only_by_case_or_accent_share_one_key(name: str, key: str) -> None:
+    """The key is the duplicate check: UNIQUE (poll_id, key) refuses the second one."""
+    assert slugify(name) == key
 
 
 def test_option_pairs_keep_the_configured_order() -> None:

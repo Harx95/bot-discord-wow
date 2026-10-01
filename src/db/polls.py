@@ -119,6 +119,31 @@ class PollRepo:
         ) as cursor:
             return [_to_option(row) for row in await cursor.fetchall()]
 
+    async def option_by_key(self, poll_id: int, key: str) -> PollOption | None:
+        """One option of a poll, by the key it is stored under."""
+        async with self._db.execute(
+            "SELECT * FROM poll_options WHERE poll_id = ? AND key = ?",
+            (poll_id, key),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        return _to_option(row) if row is not None else None
+
+    async def proposals_of(self, poll_id: int, member_id: int) -> list[PollOption]:
+        """The options this member proposed, in display order.
+
+        Only member proposals are counted: a configured option has no author.
+        """
+        async with self._db.execute(
+            """
+            SELECT * FROM poll_options
+            WHERE poll_id = ? AND created_by = ?
+            ORDER BY position
+            """,
+            (poll_id, member_id),
+        ) as cursor:
+            return [_to_option(row) for row in await cursor.fetchall()]
+
     async def add_option(
         self,
         poll_id: int,
@@ -157,6 +182,39 @@ class PollRepo:
 
         await self._db.commit()
         return _to_option(row)
+
+    async def propose_option(
+        self,
+        poll_id: int,
+        key: str,
+        label: str,
+        created_by: int,
+    ) -> PollOption | None:
+        """Add a member's proposal, or None when that key is already taken.
+
+        UNIQUE (poll_id, key) is the duplicate check that cannot be raced: two members
+        submitting the same name at the same moment both pass a read-then-write check, and
+        only one of them passes this one.
+        """
+        try:
+            return await self.add_option(poll_id, key, label, created_by)
+        except aiosqlite.IntegrityError:
+            return None
+
+    async def delete_option(self, poll_id: int, key: str) -> PollOption | None:
+        """Remove one option, and the votes it had. None when there was nothing to remove.
+
+        The votes go with it through the composite foreign key of poll_votes, which only
+        cascades because connect() turns foreign_keys on.
+        """
+        async with self._db.execute(
+            "DELETE FROM poll_options WHERE poll_id = ? AND key = ? RETURNING *",
+            (poll_id, key),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        await self._db.commit()
+        return _to_option(row) if row is not None else None
 
     async def attach_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
         """Remember which message displays the poll, so it can be edited later."""
@@ -248,6 +306,61 @@ class PollRepo:
 
         await self._db.commit()
         return _to_vote(row)
+
+    async def set_votes(
+        self,
+        poll_id: int,
+        member_id: int,
+        option_ids: Sequence[int],
+    ) -> list[PollVote]:
+        """Replace everything this member backs on this poll with the given options.
+
+        This is the shape of what a menu submits: the selection it sends is the member's
+        complete answer, not a change to it. Replacing in one transaction also means the
+        cap on how many options a member may back cannot be exceeded halfway through.
+        """
+        now = to_iso(utcnow())
+
+        await self._db.execute("BEGIN")
+        try:
+            await self._db.execute(
+                "DELETE FROM poll_votes WHERE poll_id = ? AND member_id = ?",
+                (poll_id, member_id),
+            )
+            await self._db.executemany(
+                """
+                INSERT INTO poll_votes (poll_id, member_id, option_id, voted_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(poll_id, member_id, option_id, now) for option_id in option_ids],
+            )
+        except Exception:
+            await self._db.rollback()
+            raise
+
+        await self._db.commit()
+        return await self.votes_of(poll_id, member_id)
+
+    async def clear_votes(self, poll_id: int, member_id: int) -> int:
+        """Drop every vote of one member on one poll. Returns how many were dropped."""
+        async with self._db.execute(
+            "DELETE FROM poll_votes WHERE poll_id = ? AND member_id = ?",
+            (poll_id, member_id),
+        ) as cursor:
+            dropped = cursor.rowcount
+
+        await self._db.commit()
+        return max(dropped, 0)
+
+    async def voter_count(self, poll_id: int) -> int:
+        """How many people voted, which the vote count no longer tells once votes stack."""
+        async with self._db.execute(
+            "SELECT COUNT(DISTINCT member_id) AS voters FROM poll_votes WHERE poll_id = ?",
+            (poll_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        return row["voters"] if row is not None else 0
 
     async def votes_of(self, poll_id: int, member_id: int) -> list[PollVote]:
         """Every option this member backs on this poll, oldest first."""

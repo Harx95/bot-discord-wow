@@ -8,6 +8,11 @@
 # icon      optional name of a server emoji, used instead of the unicode one.
 #           Until it exists on the server, the emoji above is used.
 # multiple  lets one member back several options at once. Off by default.
+# max_votes caps how many options one member may back. Needs multiple, and a poll with
+#           proposals: only a menu can hold a member to a number, a reaction cannot.
+#
+# A [polls.proposals] block replaces the options entirely: the members write them
+# themselves and the vote moves from reactions to a menu under the message.
 
 [[polls]]
 key = "faction"
@@ -42,3 +47,22 @@ options = [
     { key = "pve", label = "JcE", emoji = "🛡️", icon = "murloc" },
     { key = "pvp", label = "JcJ", emoji = "⚔️", icon = "pvp" },
 ]
+
+[[polls]]
+key = "nom_guilde"
+title = "Quel nom pour la guilde ?"
+description = """
+Propose le tien, vote pour ceux que tu aimes. Les noms sont réservés dès la \
+création des personnages, le 27 octobre, donc clôture avant le 25.
+
+Tu as **3 voix** : choisis-en jusqu'à trois dans le menu, dans n'importe quel \
+ordre — elles comptent toutes pareil. Tu peux changer d'avis à tout moment.
+"""
+multiple = true
+max_votes = 3
+
+[polls.proposals]
+max_per_member = 2
+max_options = 25
+min_length = 3
+max_length = 24

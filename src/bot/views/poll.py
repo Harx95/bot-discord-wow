@@ -153,9 +153,9 @@ async def _freeze_message(
 ) -> bool:
     """Redraw the poll message as closed and take the ballot off it.
 
-    Clearing the reactions is what makes the poll visibly unvotable. Returns whether it
-    worked; a failure is cosmetic, since the reaction handler removes any reaction added to
-    a closed poll anyway.
+    Whatever the ballot was: the reactions of a reaction poll, the menu and buttons of a
+    menu poll. Either way the poll becomes visibly unvotable. Returns whether it worked; a
+    failure is cosmetic, since both handlers refuse a closed poll anyway.
     """
     if poll.channel_id is None or poll.message_id is None:
         return False
@@ -166,8 +166,16 @@ async def _freeze_message(
 
     try:
         message = await channel.fetch_message(poll.message_id)
-        await message.edit(embed=poll_embed(poll, definition, tallies, client.emojis_store))
-        await message.clear_reactions()
+        # view=None drops the components of a menu poll, and costs nothing on a poll that
+        # never had any.
+        await message.edit(
+            embed=poll_embed(poll, definition, tallies, client.emojis_store),
+            view=None,
+        )
+        # Only a reaction poll has reactions to clear, and only it asked for the permission
+        # that clearing them needs.
+        if definition.votes_by_reaction:
+            await message.clear_reactions()
     except discord.HTTPException as error:
         _log.warning("Could not freeze the message of poll %r: %s", poll.key, error)
         return False

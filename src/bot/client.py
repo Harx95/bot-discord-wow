@@ -17,6 +17,7 @@ from bot.rendering import Declaration, alternates_board_embed, main_board_embed
 from bot.tree import GuildCommandTree
 from bot.views.classes import AlternateClassButton, MainClassButton, RoleButton
 from bot.views.poll import CloseCancelButton, CloseConfirmButton
+from bot.views.proposals import ClearVotesButton, ProposeButton, VoteSelect
 from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
 from db import ClassRepo, apply_migrations, connect
 
@@ -81,6 +82,9 @@ class GuildBot(commands.Bot):
             MainClassButton,
             AlternateClassButton,
             RoleButton,
+            VoteSelect,
+            ProposeButton,
+            ClearVotesButton,
         )
 
         await self.add_cog(General(self))

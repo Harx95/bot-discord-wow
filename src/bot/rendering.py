@@ -15,8 +15,13 @@ BAR_EMPTY = "▱"
 
 SINGLE_FOOTER = "Réagis pour voter — un seul choix, modifiable à tout moment."
 MULTIPLE_FOOTER = "Réagis pour voter — plusieurs choix possibles, retire ta réaction pour revenir."
+MENU_FOOTER = "Vote dans le menu — {limit} au maximum, modifiables à tout moment."
+MENU_SINGLE_FOOTER = "Vote dans le menu — un seul choix, modifiable à tout moment."
 CLOSED_FOOTER = "Sondage clos."
 NO_VOTES = "_Aucun vote pour l'instant._"
+NO_PROPOSALS = (
+    "_Aucun nom proposé pour l'instant. Clique sur « Proposer un nom » pour ouvrir le vote._"
+)
 
 
 def _bar(votes: int, total: int) -> str:
@@ -44,16 +49,53 @@ def _body(
     definition: PollDefinition,
     emojis: EmojiStore,
 ) -> str:
-    """The tally block, or a placeholder while the poll is empty."""
+    """The tally block, or a placeholder while the poll is empty.
+
+    A poll whose options the members wrote has no option at all until someone proposes one,
+    which is a different kind of empty from a poll nobody has voted on yet.
+    """
+    if not definition.votes_by_reaction and not tallies:
+        return NO_PROPOSALS
+
     total = sum(tally.votes for tally in tallies)
     if total == 0:
         return NO_VOTES
     return "\n".join(_line(tally, total, definition, emojis) for tally in tallies)
 
 
+def _ordered(tallies: Sequence[OptionTally], definition: PollDefinition) -> Sequence[OptionTally]:
+    """Configured polls keep their order; proposals are ranked, most-backed first.
+
+    A configured ballot reads in the order it was written, and its emojis sit in that same
+    order on the message. Proposals have no intended order, so the standings are the
+    useful one — ties fall back on who was proposed first.
+    """
+    if definition.votes_by_reaction:
+        return tallies
+    return sorted(tallies, key=lambda tally: (-tally.votes, tally.option.position))
+
+
 def _open_footer(definition: PollDefinition) -> str:
-    """How to vote, which differs once several answers are allowed."""
-    return MULTIPLE_FOOTER if definition.multiple else SINGLE_FOOTER
+    """How to vote, which differs by ballot and by how many answers are allowed."""
+    if definition.votes_by_reaction:
+        return MULTIPLE_FOOTER if definition.multiple else SINGLE_FOOTER
+    if not definition.multiple:
+        return MENU_SINGLE_FOOTER
+
+    limit = definition.max_votes
+    return MENU_FOOTER.format(limit=f"{limit} noms" if limit is not None else "autant que tu veux")
+
+
+def _vote_count(total: int, voters: int | None) -> str:
+    """How many votes were cast, and how many people cast them when that can differ.
+
+    With several votes per person a bare total says nothing about turnout, which is the
+    number an officer actually wants before closing.
+    """
+    if voters is None:
+        return f"{total} {'vote' if total <= 1 else 'votes'}"
+    # "voix" does not take an s, which is convenient: only the participants need agreeing.
+    return f"{total} voix de {voters} participant(s)"
 
 
 def poll_embed(
@@ -61,10 +103,16 @@ def poll_embed(
     definition: PollDefinition,
     tallies: Sequence[OptionTally],
     emojis: EmojiStore,
+    voters: int | None = None,
 ) -> discord.Embed:
-    """The live poll message: question, running counts and how to vote."""
+    """The live poll message: question, running counts and how to vote.
+
+    `voters` is how many people have voted, which only a poll allowing several votes per
+    person needs to state separately. Left out, the footer counts votes alone.
+    """
     total = sum(tally.votes for tally in tallies)
-    parts = [definition.description, _body(tallies, definition, emojis)]
+    ordered = _ordered(tallies, definition)
+    parts = [definition.description, _body(ordered, definition, emojis)]
 
     embed = discord.Embed(
         title=definition.title,
@@ -72,8 +120,7 @@ def poll_embed(
         colour=discord.Colour.blurple() if poll.is_open else discord.Colour.dark_grey(),
     )
     footer = _open_footer(definition) if poll.is_open else CLOSED_FOOTER
-    votes = "vote" if total <= 1 else "votes"
-    embed.set_footer(text=f"{total} {votes} · {footer}")
+    embed.set_footer(text=f"{_vote_count(total, voters)} · {footer}")
     return embed
 
 
@@ -82,6 +129,7 @@ def results_embed(
     definition: PollDefinition,
     tallies: Sequence[OptionTally],
     emojis: EmojiStore,
+    voters: int | None = None,
 ) -> discord.Embed:
     """Results, ranked, for the staff-only command."""
     total = sum(tally.votes for tally in tallies)
@@ -93,8 +141,7 @@ def results_embed(
         colour=discord.Colour.blurple() if poll.is_open else discord.Colour.dark_grey(),
     )
     state = "en cours" if poll.is_open else "clos"
-    votes = "vote" if total <= 1 else "votes"
-    embed.set_footer(text=f"{total} {votes} · Sondage {state}")
+    embed.set_footer(text=f"{_vote_count(total, voters)} · Sondage {state}")
     return embed
 
 
