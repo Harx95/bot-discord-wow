@@ -37,13 +37,15 @@ DEFINITION = PollDefinition.model_validate(
     }
 )
 
+# No shipped poll is single-choice any more, both structural ones accept several answers.
+# This sample keeps that mode, and the unicode fallback, under test.
 SINGLE = PollDefinition.model_validate(
     {
-        "key": "royaume",
-        "title": "Quel type de royaume ?",
+        "key": "exemple",
+        "title": "Un sondage à choix unique",
         "options": [
-            {"key": "normal", "label": "Normal", "emoji": "🛡️"},
-            {"key": "jcj", "label": "JcJ", "emoji": "⚔️"},
+            {"key": "oui", "label": "Oui", "emoji": "✔️"},
+            {"key": "non", "label": "Non", "emoji": "✖️"},
         ],
     }
 )
@@ -112,16 +114,16 @@ def test_an_icon_wins_over_the_unicode_fallback_as_a_ballot() -> None:
 
 
 def test_the_unicode_fallback_is_the_ballot_when_no_icon_is_configured() -> None:
-    assert SINGLE.options[0].ballot == "🛡"
+    assert SINGLE.options[0].ballot == "✔"
 
 
-@pytest.mark.parametrize("reacted", ["🛡️", "🛡"])
+@pytest.mark.parametrize("reacted", ["✔️", "✔"])
 def test_a_variation_selector_does_not_change_which_option_is_meant(reacted: str) -> None:
     """Discord does not always echo U+FE0F back, so both forms must resolve."""
     option = SINGLE.option_for_ballot(reacted)
 
     assert option is not None
-    assert option.key == "normal"
+    assert option.key == "oui"
 
 
 def test_an_emoji_nobody_offered_resolves_to_nothing() -> None:

@@ -164,6 +164,11 @@ Fini quand : le bot redémarre en plein sondage et les boutons fonctionnent enco
 réactions, et « un vote par personne » est devenu configurable. Les deux lignes
 ci-dessus décrivent l'état livré à l'époque, pas le code actuel.
 
+**Révisé le 1er octobre** : le sondage Skyborne est retiré, et le type de
+royaume est refait sur le modèle de Faction — deux choix, JcE et JcJ, portés par
+les emojis `:murloc:` et `:pvp:` du serveur, et répondre les deux est permis.
+Il ne reste donc que deux sondages, tous deux multi-réponses.
+
 ## Étape 4 — Déclaration de classe et de rôle
 
 Le plus délicat : deux tableaux vivants, des boutons à bascule, attribution de rôle.
@@ -329,7 +334,7 @@ Ce que ça change, au-delà de l'apparence :
 
 - [x] `emoji` obligatoire par option, `icon` facultatif nommant un emoji du serveur
 - [x] Deux options d'un même sondage ne peuvent pas partager un emoji
-- [x] `multiple` par sondage ; activé sur Faction seul
+- [x] `multiple` par sondage ; activé sur Faction, puis sur Type de royaume
 - [x] Migration 003 : plusieurs votes par membre, anciens votes conservés
 - [x] `EmojiStore` lit le serveur, puis l'application, puis l'unicode
 - [x] Intent `guild_reactions`, non privilégié
@@ -355,9 +360,9 @@ Le bot a besoin de « Gérer les messages » dans le salon avant de commencer.
 | 3  | Réagir 🔴 en plus | Horde passe à 1 **et Alliance reste à 1** : le multi-vote marche |
 | 4  | Retirer 🔵 | Alliance retombe à 0, Horde reste à 1 |
 | 5  | Réagir 🍕 | La réaction est retirée par le bot, les compteurs ne bougent pas |
-| 6  | `/sondage clé:royaume`, réagir 🛡️ | Normal à 1 |
-| 7  | Réagir ⚔️ sur le même sondage | JcJ à 1, Normal à 0, **et la réaction 🛡️ disparaît** : choix unique |
-| 8  | `Ctrl-C`, réagir 🎭 pendant l'arrêt, relancer | Au démarrage, Roleplay est à 1 et JcJ à 0 : la réconciliation a vu la réaction posée hors ligne |
+| 6  | `/sondage clé:royaume`, réagir :murloc: | JcE à 1 |
+| 7  | Réagir :pvp: en plus | JcJ à 1 **et JcE reste à 1** : ce sondage accepte aussi les deux |
+| 8  | `Ctrl-C`, retirer :murloc: pendant l'arrêt, relancer | Au démarrage, JcE est à 0 et JcJ à 1 : la réconciliation a vu la réaction retirée hors ligne |
 | 9  | `/sondage clé:faction` | **Refusé** : déjà affiché et déjà voté |
 | 10 | `/resultats clé:faction` | Compteurs cohérents avec les réactions du message |
 | 11 | `/clore clé:faction` → confirmer | Message en gris, « Sondage clos. », **plus aucune réaction** |
@@ -367,9 +372,9 @@ Le bot a besoin de « Gérer les messages » dans le salon avant de commencer.
 L'étape 8 est la décisive : c'est elle qui vérifie la réconciliation, et elle
 n'a pas d'équivalent du temps des boutons.
 
-Les étapes 3 et 7 opposent les deux modes de vote sur deux sondages différents.
-L'étape 9 vérifie le garde-fou du réaffichage, l'étape 13 qu'il ne bloque pas
-une reprise légitime.
+Plus aucun sondage n'est à choix unique : le repository sait encore le faire,
+mais seul un sondage à venir le rejouera. L'étape 9 vérifie le garde-fou du
+réaffichage, l'étape 13 qu'il ne bloque pas une reprise légitime.
 
 ## Étape 5 — Sondage nom de guilde
 
@@ -378,7 +383,7 @@ Vote ouvert avec propositions des membres.
 **Le vote par réaction ne convient pas à cette étape** : un message plafonne à
 20 réactions distinctes, et un nom proposé par un membre n'a pas d'emoji à lui.
 Il faudra donc réintroduire un vote à boutons ou à menu déroulant pour ce
-sondage-là, à côté des réactions que gardent les trois autres. La couche base et
+sondage-là, à côté des réactions que gardent les deux autres. La couche base et
 `/clore` ne bougent pas, seul l'affichage du vote change.
 
 - [ ] Bouton « Proposer un nom » ouvrant une modale

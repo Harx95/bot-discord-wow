@@ -30,24 +30,15 @@ options = [
 key = "royaume"
 title = "Quel type de royaume ?"
 description = """
-Normal pour du JcE tranquille, JcJ pour le monde ouvert contesté, \
-Roleplay pour l'ambiance. Clôture avant le 25 octobre.
-"""
-options = [
-    { key = "normal", label = "Normal", emoji = "🛡️" },
-    { key = "jcj", label = "JcJ", emoji = "⚔️" },
-    { key = "roleplay", label = "Roleplay", emoji = "🎭" },
-]
+Vote décisif : on monte tous sur le même royaume, et la création ouvre \
+le 27 octobre. JcE pour progresser et raider tranquille, JcJ pour le monde \
+ouvert contesté. Le contenu du jeu est le même des deux côtés.
 
-[[polls]]
-key = "skyborne"
-title = "Le pack Skyborne t'intéresse-t-il ?"
-description = """
-Race payante, disponible dans les deux factions, sans accès Paladin. \
-Sondage indicatif : il sert à estimer la composition, pas à t'engager.
+Réagis avec l'emoji du type qui te convient. Les deux te vont ? Réagis avec \
+les deux. Clôture avant le 25 octobre.
 """
+multiple = true
 options = [
-    { key = "oui", label = "Oui, je compte le prendre", emoji = "✅" },
-    { key = "peut_etre", label = "Peut-être, je verrai", emoji = "🤔" },
-    { key = "non", label = "Non", emoji = "❌" },
+    { key = "pve", label = "JcE", emoji = "🛡️", icon = "murloc" },
+    { key = "pvp", label = "JcJ", emoji = "⚔️", icon = "pvp" },
 ]

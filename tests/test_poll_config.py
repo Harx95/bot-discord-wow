@@ -24,7 +24,7 @@ def _poll(**overrides: object) -> dict[str, object]:
 
 def test_the_shipped_file_is_valid(catalog: PollCatalog) -> None:
     """Guards against a typo in polls.toml reaching startup."""
-    assert catalog.keys == ["faction", "royaume", "skyborne"]
+    assert catalog.keys == ["faction", "royaume"]
 
 
 def test_the_faction_poll_offers_the_two_factions_and_accepts_both(
@@ -37,9 +37,17 @@ def test_the_faction_poll_offers_the_two_factions_and_accepts_both(
     assert faction.multiple
 
 
-def test_only_the_faction_poll_accepts_several_answers(catalog: PollCatalog) -> None:
-    """A realm type or a Skyborne answer is a single choice; nothing else should drift."""
-    assert [p.key for p in catalog.polls if p.multiple] == ["faction"]
+def test_the_realm_poll_offers_the_two_types_and_accepts_both(catalog: PollCatalog) -> None:
+    """Built on the faction model: two sides, and backing both is an answer of its own."""
+    realm = catalog.get("royaume")
+    assert realm is not None
+    assert [o.key for o in realm.options] == ["pve", "pvp"]
+    assert realm.multiple
+
+
+def test_every_structural_poll_accepts_several_answers(catalog: PollCatalog) -> None:
+    """Both pre-launch polls ask which sides suit a member, not which single one wins."""
+    assert [p.key for p in catalog.polls if p.multiple] == catalog.keys
 
 
 def test_option_pairs_keep_the_configured_order() -> None:
