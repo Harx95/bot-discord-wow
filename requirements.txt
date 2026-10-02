@@ -1,0 +1,12 @@
+# Dependencies, pinned to the versions the bot runs on.
+# Source of truth stays pyproject.toml; this file is a convenience for
+# environments without a pyproject-aware installer.
+aiosqlite==0.22.1
+discord.py==2.7.1
+pydantic-settings==2.15.0
+
+# Development tooling.
+pyright==1.1.414
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.16.9

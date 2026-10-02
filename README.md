@@ -127,7 +127,7 @@ l'application quand on préfère ne pas consommer les 50 emplacements du serveur
 
 `/classes` poste **deux** messages, tenus à jour à chaque clic :
 
-- **Composition au lancement** — le personnage principal, un seul par personne.
+- **Ta classe au lancement** — le personnage principal, un seul par personne.
 - **Autres classes envisagées au lancement** — les autres classes auxquelles la
   personne réfléchit pour son personnage principal, sans avoir tranché : jusqu'à
   `max_choices - 1`, sans ordre entre elles.

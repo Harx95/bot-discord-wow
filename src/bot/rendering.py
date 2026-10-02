@@ -150,7 +150,7 @@ def results_embed(
 # A member's display name paired with one character they declared.
 Declaration = tuple[str, MemberChoice]
 
-MAIN_BOARD_TITLE = "Composition au lancement"
+MAIN_BOARD_TITLE = "Ta classe au lancement"
 ALTERNATES_BOARD_TITLE = "Autres classes envisagées au lancement"
 
 MAIN_BOARD_INTRO = (
