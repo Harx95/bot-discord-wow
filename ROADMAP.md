@@ -474,7 +474,7 @@ Fini quand : ajouter un métier met l'annuaire à jour sans intervention.
 
 ## Avant d'inviter les membres
 
-- [ ] Créer un serveur de test et y reproduire la structure
+- [x] Créer un serveur de test et y reproduire la structure
 - [ ] Passer les vérifications de permissions avec un second compte
 - [ ] Choisir et configurer l'hébergement
 - [ ] Sauvegarde automatique de la base
