@@ -1,0 +1,49 @@
+# Profession icons for the directory. Edited without touching the code.
+#
+# The professions themselves come from the Blizzard API, names included: this file only
+# gives each one an emoji, keyed by its API id. A profession missing here still shows,
+# behind the default emoji.
+#
+# Only primary professions are listed in the directory. Cooking, Fishing and First Aid
+# are secondary ones for the API and never reach this file.
+#
+# skill_cap  highest skill in the game, which the bars are drawn against.
+
+default_emoji = "🛠️"
+skill_cap = 300
+
+[[professions]]
+id = 171  # Alchimie
+emoji = "⚗️"
+
+[[professions]]
+id = 164  # Forge
+emoji = "⚒️"
+
+[[professions]]
+id = 333  # Enchantement
+emoji = "✨"
+
+[[professions]]
+id = 202  # Ingénierie
+emoji = "⚙️"
+
+[[professions]]
+id = 182  # Herboristerie
+emoji = "🌿"
+
+[[professions]]
+id = 165  # Travail du cuir
+emoji = "🥾"
+
+[[professions]]
+id = 186  # Minage
+emoji = "⛏️"
+
+[[professions]]
+id = 393  # Dépeçage
+emoji = "🔪"
+
+[[professions]]
+id = 197  # Couture
+emoji = "🧵"

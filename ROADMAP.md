@@ -3,18 +3,22 @@
 Une étape à la fois. Ne pas anticiper les suivantes.
 Chaque étape se termine par : test manuel réussi, puis commit, puis rendu d'explication technique court et concis.
 
-## Où on en est — 1er octobre 2026
+## Où on en est — 15 novembre 2026
 
-Étapes 1 à 4bis terminées, testées sur le serveur et commitées.
+Le jeu est sorti le 4 novembre. Les sondages sont clos et leurs messages
+conservés sur le serveur. Le bot tourne sur le VPS. La guilde s'appelle
+« Ah sheep here wego again ».
 
-Deux étapes sont écrites mais **pas encore testées sur le serveur** :
-l'**étape 4ter**, qui fait passer le vote des boutons aux réactions, et
-l'**étape 5**, le sondage du nom de guilde. Leurs deux scénarios de recette sont
-en bas de ce fichier, à dérouler avant de commiter.
+**En cours : l'étape 6**, l'annuaire des métiers, refondu autour de l'API
+Blizzard : plus aucune saisie par les membres, tout vient du jeu.
 
-Côté échéances, le code ne bloque plus rien : les trois sondages peuvent être
-clos dès que tu as tranché. L'étape 5 a aussi amené les modales, sur lesquelles
-se greffera la commande de création de sondage à la volée.
+### Historique — 1er octobre 2026
+
+Étapes 1 à 4bis terminées, testées sur le serveur et commitées. Les étapes
+4ter (vote par réaction) et 5 (sondage du nom de guilde) ont été écrites et
+commitées ensuite ; leurs scénarios de recette sont plus bas. L'étape 5 a
+amené les modales, sur lesquelles se greffera la commande de création de
+sondage à la volée.
 
 L'étape 4 a été remaniée le 30 septembre, après un premier jet : deux messages
 au lieu d'un, chacun avec son tableau en colonnes Tank / Soigneur / DPS, des
@@ -459,18 +463,72 @@ ne s'accompagne pas d'un effacement silencieux des voix au démarrage.
 L'étape 9 vérifie une limite tenue par Discord, pas par le bot — c'est pour ça
 qu'elle vaut d'être vue au moins une fois.
 
-## Étape 6 — Métiers et annuaire
+## Étape 6 — Annuaire des métiers
 
-À faire après la sortie du jeu : la liste des métiers n'est pas fiable avant.
+Refondue le 15 novembre, après la sortie. La version d'origine faisait déclarer
+ses métiers à chaque membre ; l'API Blizzard de WoW Forever les donne
+directement, compétence comprise. Plus de saisie, plus de rôles Discord de
+métier : l'annuaire reflète le jeu.
 
-- [ ] Migration 002 : table professions
-- [ ] Sélection des métiers dans #rôles, avec niveau et notes
-- [ ] Attribution des rôles Discord de métier
-- [ ] Message d'annuaire dans #métiers, mis à jour automatiquement
-- [ ] Gestion du message supprimé et de la limite de caractères d'un embed
-- [ ] `/artisan <métier>` pour une recherche rapide
+Ce que l'API impose :
 
-Fini quand : ajouter un métier met l'annuaire à jour sans intervention.
+- **Namespaces propres à Forever** : `profile-forever-eu`, `static-forever-eu`.
+  Seule la région EU connaît nos personnages.
+- **Pas de royaume** : un personnage s'appelle `{prénom}-{nom}`, par exemple
+  `harx-windharrow`. Le roster de la guilde donne ces slugs.
+- **Les noms de métiers arrivent en anglais** dans le profil d'un personnage,
+  mais en français dans les données statiques (`/data/wow/profession/{id}`).
+  On les y cherche une fois par métier, puis on les garde en base.
+- **Données à la dernière déconnexion**, et seulement à partir du niveau 10.
+  Un personnage introuvable garde ses métiers de la synchro précédente.
+- **Métiers principaux seulement** : l'API range déjà Cuisine, Pêche et
+  Secourisme à part, dans les secondaires. Aucune liste à maintenir.
+
+- [ ] Identifiants Blizzard, région et slug de guilde dans `.env`
+- [ ] Client de l'API : jeton, roster, métiers d'un personnage, nom français d'un métier
+- [ ] Migration 004 : personnages, métiers, compétences
+- [ ] Synchro : roster, puis métiers de chaque membre, en une transaction
+- [ ] Un membre parti de la guilde disparaît de l'annuaire
+- [ ] Emoji par métier dans `professions.toml`, avec un repli
+- [ ] Un message dans #métiers : un bloc par métier, membres triés par compétence
+- [ ] Le message n'est réécrit que si les données ont changé
+- [ ] Synchro automatique chaque jour à 5 h, heure de Paris
+- [ ] `/annuaire` poste le message, `/annuaire-synchro` force une synchro
+- [ ] Limites d'un embed : un métier trop long se poursuit dans un second bloc
+
+Fini quand : `/annuaire-synchro` liste les métiers des membres de la guilde,
+chacun avec sa compétence, et une seconde synchro sans changement ne touche
+pas au message.
+
+### Scénario de recette — à dérouler
+
+Le `.env` du VPS doit d'abord recevoir les quatre variables `BLIZZARD_*`
+de `.env.example`, et `pip install -e .` y être relancé pour `tzdata`.
+La migration 004 s'applique seule au démarrage.
+
+| # | Action | Attendu |
+|---|--------|---------|
+| 1 | Démarrer le bot | Journal : migration 004 appliquée, aucune erreur |
+| 2 | `/annuaire-synchro` | « 25 personnage(s) lus sur 28 », la liste des invisibles, et la note « lance `/annuaire` » |
+| 3 | `/annuaire` dans #métiers | Un message, un bloc par métier avec son emoji, membres triés par compétence |
+| 4 | `/annuaire` une seconde fois | Refusé, avec le lien vers le message existant |
+| 5 | `/annuaire-synchro` | « Rien n'a changé », le message est réécrit à l'identique |
+| 6 | Changer un emoji dans `professions.toml`, redémarrer, `/annuaire-synchro` | Le nouvel emoji apparaît dans **le même** message |
+| 7 | Supprimer le message, `/annuaire-synchro` | La note « lance `/annuaire` » revient, aucune erreur |
+| 8 | `/annuaire`, puis attendre le lendemain 5 h | Journal : « Directory synced », message édité seulement si un métier a bougé |
+
+L'étape 5 vérifie qu'une synchro sans changement est sans effet sur les
+données ; l'étape 8, que la synchro quotidienne tourne seule.
+
+## Étape 7 — Recettes connues
+
+Pas commencée. Les recettes sont dans la même réponse de l'API que les
+métiers, avec leur ID ; leur nom français s'obtient comme celui des métiers.
+
+- [ ] Stocker les recettes connues à la synchro, noms français en cache
+- [ ] Commande : un personnage et un objet, en français ou en anglais
+- [ ] Commande : toutes les recettes d'un artisan
+- [ ] Réponses éphémères : seul l'auteur de la commande les voit
 
 ## Avant d'inviter les membres
 

@@ -29,6 +29,7 @@ from config.polls import (
     load_catalog,
     slugify,
 )
+from config.professions import ProfessionCatalog, ProfessionIcon, load_professions
 from config.settings import Settings, get_settings
 
 __all__ = [
@@ -41,6 +42,8 @@ __all__ = [
     "OptionDefinition",
     "PollCatalog",
     "PollDefinition",
+    "ProfessionCatalog",
+    "ProfessionIcon",
     "ProposalRejection",
     "ProposalRules",
     "RoleDefinition",
@@ -58,5 +61,6 @@ __all__ = [
     "get_settings",
     "load_catalog",
     "load_classes",
+    "load_professions",
     "slugify",
 ]

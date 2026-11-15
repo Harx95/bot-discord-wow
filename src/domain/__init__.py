@@ -9,10 +9,14 @@ from domain.member import (
     MemberChoice,
 )
 from domain.poll import OptionTally, Poll, PollOption, PollStatus, PollVote
+from domain.profession import CharacterSkill, DirectoryLine, GuildCharacter, Profession
 
 __all__ = [
     "FIRST_CHOICE",
+    "CharacterSkill",
     "ClassRole",
+    "DirectoryLine",
+    "GuildCharacter",
     "MainUpdate",
     "ManagedMessage",
     "Member",
@@ -22,4 +26,5 @@ __all__ = [
     "PollOption",
     "PollStatus",
     "PollVote",
+    "Profession",
 ]

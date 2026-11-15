@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from bot.boards import BOARD_BUILDERS
 from bot.cogs.classes import Classes
+from bot.cogs.directory import Directory
 from bot.cogs.general import General
 from bot.cogs.polls import Polls
 from bot.emojis import EmojiStore
@@ -90,6 +91,7 @@ class GuildBot(commands.Bot):
         await self.add_cog(General(self))
         await self.add_cog(Polls(self))
         await self.add_cog(Classes(self))
+        await self.add_cog(Directory(self))
         await self.add_cog(ReactionVotes(self))
 
         await self.emojis_store.refresh(self)

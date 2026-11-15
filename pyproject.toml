@@ -7,6 +7,9 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "discord.py>=2.7.1",
     "pydantic-settings>=2.15.0",
+    # Time zone data for the daily sync: Windows ships none, and pinning it keeps every
+    # host on the same rules.
+    "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +25,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bot", "src/config", "src/db", "src/domain"]
+packages = ["src/blizzard", "src/bot", "src/config", "src/db", "src/domain"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

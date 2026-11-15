@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,30 @@ class Settings(BaseSettings):
     database_path: Path = Field(
         default=Path("data/bot.db"),
         description="SQLite file; the parent directory is created on startup",
+    )
+
+    blizzard_client_id: str = Field(description="Client id issued by develop.battle.net")
+    blizzard_client_secret: SecretStr = Field(description="Secret of the Blizzard API client")
+    blizzard_region: Literal["eu", "us", "kr", "tw"] = Field(
+        default="eu",
+        description="API region the guild's characters live in",
+    )
+    blizzard_guild_slug: str = Field(
+        description="Guild slug in the API, as shown in a character's profile",
+    )
+    professions_file: Path = Field(
+        default=Path("professions.toml"),
+        description="Profession icons, read at startup",
+    )
+    timezone: str = Field(
+        default="Europe/Paris",
+        description="Time zone the daily profession sync is scheduled in",
+    )
+    directory_sync_hour: int = Field(
+        default=5,
+        ge=0,
+        le=23,
+        description="Hour of the daily profession sync, in the configured time zone",
     )
 
     @property
