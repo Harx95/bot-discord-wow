@@ -7,12 +7,13 @@ configuration fails at startup rather than when a command is run.
 
 import re
 import tomllib
-import unicodedata
 from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from domain import fold
 
 # Discord API limits.
 OPTION_LABEL_LIMIT = 80
@@ -103,11 +104,7 @@ def slugify(name: str) -> str:
     UNIQUE (poll_id, key) constraint of poll_options then refuses the duplicate. So
     "Les Loups" and "les loups" cannot both be proposed.
     """
-    # NFKD splits an accented letter into its base letter and a combining mark, which the
-    # ASCII encoding below then drops.
-    folded = unicodedata.normalize("NFKD", name)
-    stripped = folded.encode("ascii", "ignore").decode("ascii").casefold()
-    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]", "_", stripped)).strip("_")
+    return fold(name).replace(" ", "_")
 
 
 class ProposalRejection(StrEnum):

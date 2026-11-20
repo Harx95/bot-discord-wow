@@ -7,12 +7,28 @@ import aiosqlite
 import pytest
 
 from bot.emojis import EmojiStore
-from config import ClassCatalog, PollCatalog, load_catalog, load_classes
-from db import ClassRepo, MemberRepo, PollRepo, apply_migrations, connect
+from config import (
+    ClassCatalog,
+    PollCatalog,
+    ProfessionCatalog,
+    load_catalog,
+    load_classes,
+    load_professions,
+)
+from db import (
+    ClassRepo,
+    MemberRepo,
+    MessageRepo,
+    PollRepo,
+    ProfessionRepo,
+    apply_migrations,
+    connect,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_POLLS = PROJECT_ROOT / "polls.toml"
 PROJECT_CLASSES = PROJECT_ROOT / "classes.toml"
+PROJECT_PROFESSIONS = PROJECT_ROOT / "professions.toml"
 
 
 @pytest.fixture
@@ -25,6 +41,12 @@ def catalog() -> PollCatalog:
 def classes() -> ClassCatalog:
     """The class definitions actually shipped with the project."""
     return load_classes(PROJECT_CLASSES)
+
+
+@pytest.fixture
+def professions_catalog() -> ProfessionCatalog:
+    """The profession definitions actually shipped with the project."""
+    return load_professions(PROJECT_PROFESSIONS)
 
 
 @pytest.fixture
@@ -64,3 +86,15 @@ def polls(connection: aiosqlite.Connection) -> PollRepo:
 def class_repo(connection: aiosqlite.Connection) -> ClassRepo:
     """Class repository bound to the temporary database."""
     return ClassRepo(connection)
+
+
+@pytest.fixture
+def messages(connection: aiosqlite.Connection) -> MessageRepo:
+    """A message store on the temporary database."""
+    return MessageRepo(connection)
+
+
+@pytest.fixture
+def professions(connection: aiosqlite.Connection) -> ProfessionRepo:
+    """A profession store on the temporary database."""
+    return ProfessionRepo(connection)

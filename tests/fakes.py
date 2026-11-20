@@ -1,11 +1,13 @@
-"""Stand-ins for the discord.py objects the role logic touches.
+"""Stand-ins for the objects the bot talks to: discord.py, and the Battle.net session.
 
 Only what the functions under test actually use: a position to compare, a permission flag,
-and a record of the calls that would have gone to Discord.
+a record of the calls that would have gone to Discord, and canned HTTP responses.
 """
 
+from dataclasses import dataclass, field
 from typing import cast
 
+import aiohttp
 import discord
 
 
@@ -99,3 +101,73 @@ def as_member(member: FakeMember) -> discord.Member:
 def as_role(role: FakeRole) -> discord.Role:
     """A stand-in role, typed as the real one."""
     return cast(discord.Role, role)
+
+
+# --- the Battle.net API ---------------------------------------------------------------
+#
+# A stand-in for aiohttp.ClientSession, so the client is exercised without Blizzard. Only
+# the two methods ForeverClient calls are implemented: get() and post().
+
+
+@dataclass
+class FakeResponse:
+    """One canned HTTP response."""
+
+    status: int = 200
+    body: object = None
+    headers: dict[str, str] = field(default_factory=dict)
+    error: Exception | None = None
+
+    async def json(self) -> object:
+        return self.body
+
+    async def __aenter__(self) -> "FakeResponse":
+        if self.error is not None:
+            raise self.error
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
+class FakeSession:
+    """Answers each path from a queue, and records what was asked.
+
+    A path mapped to a list answers its entries in turn, so a retry can be given a
+    different outcome from the first attempt.
+    """
+
+    def __init__(
+        self,
+        responses: dict[str, FakeResponse | list[FakeResponse]] | None = None,
+        token: FakeResponse | list[FakeResponse] | None = None,
+    ) -> None:
+        self._responses = responses or {}
+        self._token = token or FakeResponse(body={"access_token": "t0ken", "expires_in": 86400})
+        self.requests: list[str] = []
+        self.token_requests = 0
+
+    @staticmethod
+    def _next(
+        entry: FakeResponse | list[FakeResponse],
+    ) -> FakeResponse:
+        if isinstance(entry, list):
+            return entry.pop(0) if len(entry) > 1 else entry[0]
+        return entry
+
+    def post(self, url: str, **_: object) -> FakeResponse:
+        self.token_requests += 1
+        return self._next(self._token)
+
+    def get(self, url: str, **_: object) -> FakeResponse:
+        path = url.split(".blizzard.com", 1)[-1]
+        self.requests.append(path)
+        entry = self._responses.get(path)
+        if entry is None:
+            return FakeResponse(status=404)
+        return self._next(entry)
+
+
+def as_session(session: FakeSession) -> aiohttp.ClientSession:
+    """Hand a fake session to code that is typed for the real one."""
+    return cast("aiohttp.ClientSession", session)

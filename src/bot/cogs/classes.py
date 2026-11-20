@@ -13,7 +13,7 @@ from bot.permissions import staff_only
 from bot.rendering import composition_embed
 from bot.roles import sync_class_roles
 from bot.views.classes import build_alternates_view, build_main_view
-from db import ClassRepo
+from db import ClassRepo, MessageRepo
 
 if TYPE_CHECKING:
     from bot.client import GuildBot
@@ -140,7 +140,7 @@ class Classes(commands.Cog):
             ),
         ]
         for key, message in posted:
-            await classes.remember_message(key, channel.id, message.id)
+            await MessageRepo(self.bot.db).remember(key, channel.id, message.id)
 
         _log.info("Class boards posted by %s in #%s", interaction.user, channel)
         await interaction.followup.send(f"{BOARDS_POSTED}{warning}", ephemeral=True)

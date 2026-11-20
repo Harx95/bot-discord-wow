@@ -1,9 +1,9 @@
-"""Ranked class choices, class roles and managed messages. All their SQL lives here."""
+"""Ranked class choices and the Discord roles they grant. All their SQL lives here."""
 
 import aiosqlite
 
 from db.timestamps import from_iso, to_iso, utcnow
-from domain import FIRST_CHOICE, ClassRole, MainUpdate, ManagedMessage, MemberChoice
+from domain import FIRST_CHOICE, ClassRole, MainUpdate, MemberChoice
 
 INSERT_CHOICE = """
 INSERT INTO member_choices (member_id, rank, class_key, role_key, created_at)
@@ -31,18 +31,8 @@ def _to_class_role(row: aiosqlite.Row) -> ClassRole:
     )
 
 
-def _to_managed_message(row: aiosqlite.Row) -> ManagedMessage:
-    """Build a managed message from a database row."""
-    return ManagedMessage(
-        key=row["key"],
-        channel_id=row["channel_id"],
-        message_id=row["message_id"],
-        updated_at=from_iso(row["updated_at"]),
-    )
-
-
 class ClassRepo:
-    """Read and write ranked choices, class roles and the messages showing them.
+    """Read and write ranked choices and the Discord roles they grant.
 
     Rank 1 is the main character, the only one earning a Discord role. Ranks 2 and above
     are the alternates, which the second board shows without their rank: removing one
@@ -297,36 +287,3 @@ class ClassRepo:
         """Every class-to-role link, keyed by class."""
         async with self._db.execute("SELECT * FROM class_roles") as cursor:
             return {row["class_key"]: row["role_id"] for row in await cursor.fetchall()}
-
-    # --- managed messages -------------------------------------------------------------
-
-    async def remember_message(self, key: str, channel_id: int, message_id: int) -> None:
-        """Record which message the bot keeps up to date for a given purpose."""
-        await self._db.execute(
-            """
-            INSERT INTO managed_messages (key, channel_id, message_id, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (key) DO UPDATE SET
-                channel_id = excluded.channel_id,
-                message_id = excluded.message_id,
-                updated_at = excluded.updated_at
-            """,
-            (key, channel_id, message_id, to_iso(utcnow())),
-        )
-        await self._db.commit()
-
-    async def managed_message(self, key: str) -> ManagedMessage | None:
-        """Look up a managed message."""
-        async with self._db.execute(
-            "SELECT * FROM managed_messages WHERE key = ?",
-            (key,),
-        ) as cursor:
-            row = await cursor.fetchone()
-
-        return _to_managed_message(row) if row is not None else None
-
-    async def forget_message(self, key: str) -> bool:
-        """Drop a managed message, after it was deleted on Discord."""
-        cursor = await self._db.execute("DELETE FROM managed_messages WHERE key = ?", (key,))
-        await self._db.commit()
-        return cursor.rowcount > 0

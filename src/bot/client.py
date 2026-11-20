@@ -19,7 +19,7 @@ from bot.views.classes import AlternateClassButton, MainClassButton, RoleButton
 from bot.views.poll import CloseCancelButton, CloseConfirmButton
 from bot.views.proposals import ClearVotesButton, ProposeButton, VoteSelect
 from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
-from db import ClassRepo, apply_migrations, connect
+from db import ClassRepo, MessageRepo, apply_migrations, connect
 
 _log = logging.getLogger(__name__)
 
@@ -119,14 +119,14 @@ class GuildBot(commands.Bot):
         if not keys:
             return
 
-        classes = ClassRepo(self.db)
-        rows = await classes.declarations()
+        rows = await ClassRepo(self.db).declarations()
+        messages = MessageRepo(self.db)
         for key in keys:
-            await self._rewrite_board(classes, key, rows)
+            await self._rewrite_board(messages, key, rows)
 
     async def _rewrite_board(
         self,
-        classes: ClassRepo,
+        messages: MessageRepo,
         key: str,
         rows: Sequence[Declaration],
     ) -> None:
@@ -135,14 +135,14 @@ class GuildBot(commands.Bot):
         Failures are logged and swallowed: a member declaring their class must not see an
         error because an officer deleted a board message.
         """
-        managed = await classes.managed_message(key)
+        managed = await messages.get(key)
         if managed is None:
             return
 
         channel = self.get_channel(managed.channel_id)
         if not isinstance(channel, discord.TextChannel | discord.Thread):
             _log.warning("Channel %d of board %r is gone", managed.channel_id, key)
-            await classes.forget_message(key)
+            await messages.forget(key)
             return
 
         embed = BOARD_BUILDERS[key](self.classes, self.emojis_store, rows)
@@ -151,7 +151,7 @@ class GuildBot(commands.Bot):
             await message.edit(embed=embed)
         except discord.NotFound:
             _log.info("Board %r was deleted; forgetting it", key)
-            await classes.forget_message(key)
+            await messages.forget(key)
         except discord.HTTPException as error:
             _log.warning("Could not refresh board %r: %s", key, error)
 

@@ -30,6 +30,26 @@ class Settings(BaseSettings):
         description="Short form of the guild name, for titles and footers",
     )
 
+    blizzard_client_id: str = Field(
+        description="Battle.net API client, created on develop.battle.net",
+    )
+    blizzard_client_secret: SecretStr = Field(description="Secret of that Battle.net client")
+    blizzard_region: str = Field(
+        default="eu",
+        pattern="^(us|eu|kr|tw)$",
+        description="Battle.net region. Forever has no realms, so this alone locates the guild",
+    )
+    professions_channel_id: int = Field(
+        default=1551292696784535712,
+        description="Channel holding the profession directory and answering its commands",
+    )
+    profession_sync_hour: int = Field(
+        default=5,
+        ge=0,
+        le=23,
+        description="Hour, Europe/Paris, at which the roster is synced every day",
+    )
+
     log_level: str = Field(default="INFO", description="Root logging level")
     polls_file: Path = Field(
         default=Path("polls.toml"),
@@ -46,6 +66,10 @@ class Settings(BaseSettings):
     database_path: Path = Field(
         default=Path("data/bot.db"),
         description="SQLite file; the parent directory is created on startup",
+    )
+    professions_file: Path = Field(
+        default=Path("professions.toml"),
+        description="Profession definitions, read at startup",
     )
 
     @property

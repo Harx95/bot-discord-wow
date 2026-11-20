@@ -1,0 +1,94 @@
+# Professions, in the order the directory shows them: the crafting primaries, then the
+# gathering primaries, then the secondaries.
+#
+# blizzard_id is the skill line id the profile API answers with. Every one below was read off
+# the live API on 20 November 2026, on the whole roster, with no unknown id left over. An id
+# this file does not list is still shown in the directory, under the English name the API
+# gives it, and logged as a warning so it can be added here.
+#
+# name is the French label the bot displays; the API only ever answers in English.
+# kind decides which block of the directory a profession belongs to, nothing more.
+
+[[professions]]
+key = "alchemy"
+blizzard_id = 171
+name = "Alchimie"
+kind = "primary"
+emoji = "⚗️"
+
+[[professions]]
+key = "blacksmithing"
+blizzard_id = 164
+name = "Forge"
+kind = "primary"
+emoji = "🔨"
+
+[[professions]]
+key = "enchanting"
+blizzard_id = 333
+name = "Enchantement"
+kind = "primary"
+emoji = "✨"
+
+[[professions]]
+key = "engineering"
+blizzard_id = 202
+name = "Ingénierie"
+kind = "primary"
+emoji = "⚙️"
+
+[[professions]]
+key = "leatherworking"
+blizzard_id = 165
+name = "Travail du cuir"
+kind = "primary"
+emoji = "🧥"
+
+[[professions]]
+key = "tailoring"
+blizzard_id = 197
+name = "Couture"
+kind = "primary"
+emoji = "🧵"
+
+[[professions]]
+key = "herbalism"
+blizzard_id = 182
+name = "Herboristerie"
+kind = "primary"
+emoji = "🌿"
+
+[[professions]]
+key = "mining"
+blizzard_id = 186
+name = "Minage"
+kind = "primary"
+emoji = "⛏️"
+
+[[professions]]
+key = "skinning"
+blizzard_id = 393
+name = "Dépeçage"
+kind = "primary"
+emoji = "🔪"
+
+[[professions]]
+key = "cooking"
+blizzard_id = 185
+name = "Cuisine"
+kind = "secondary"
+emoji = "🍖"
+
+[[professions]]
+key = "first_aid"
+blizzard_id = 129
+name = "Secourisme"
+kind = "secondary"
+emoji = "🩹"
+
+[[professions]]
+key = "fishing"
+blizzard_id = 356
+name = "Pêche"
+kind = "secondary"
+emoji = "🎣"
