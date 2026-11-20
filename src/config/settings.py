@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,9 +35,8 @@ class Settings(BaseSettings):
         description="Battle.net API client, created on develop.battle.net",
     )
     blizzard_client_secret: SecretStr = Field(description="Secret of that Battle.net client")
-    blizzard_region: str = Field(
+    blizzard_region: Literal["us", "eu", "kr", "tw"] = Field(
         default="eu",
-        pattern="^(us|eu|kr|tw)$",
         description="Battle.net region. Forever has no realms, so this alone locates the guild",
     )
     professions_channel_id: int = Field(

@@ -81,9 +81,7 @@ class StubBot:
                 "blizzard_client_secret": "secret",
             }
         )
-        self.forever = ForeverClient(
-            "eu", "id", "secret", as_session(session), retry_seconds=0.001
-        )
+        self.forever = ForeverClient("eu", "id", "secret", as_session(session), retry_seconds=0.001)
 
 
 def _bot(

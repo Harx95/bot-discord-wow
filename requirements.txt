@@ -5,6 +5,7 @@ aiohttp==3.14.3
 aiosqlite==0.22.1
 discord.py==2.7.1
 pydantic-settings==2.15.0
+tzdata==2026.6
 
 # Development tooling.
 pyright==1.1.414

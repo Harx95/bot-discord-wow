@@ -7,6 +7,17 @@
 -- blizzard_id is the skill line id the profile API answers with. It is not a foreign key:
 -- professions live in professions.toml, which stays the source of truth for their French
 -- name and their order, exactly as classes.toml does for the classes.
+--
+-- Numbered 005 although it is the fourth migration: a parallel 004_professions existed on
+-- main, from a second implementation of this directory that stored no recipes. The runner
+-- skips a file whose stem is already recorded in schema_migrations, so reusing 004 would
+-- have been silently ignored on any database that ran the other one -- and every query
+-- here would then have failed on a missing table. Hence a new number, and the three drops
+-- below, which clear that schema where it was applied and do nothing where it was not.
+
+DROP TABLE IF EXISTS character_skills;
+DROP TABLE IF EXISTS guild_characters;
+DROP TABLE IF EXISTS professions;
 
 -- One row per character the guild roster lists, whatever its level. Characters below level
 -- 10 are kept here even though the API refuses to describe them, so the directory can say

@@ -8,6 +8,8 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "discord.py>=2.7.1",
     "pydantic-settings>=2.15.0",
+    # ZoneInfo reads the system database, which Windows does not ship.
+    "tzdata>=2026.6",
 ]
 
 [project.optional-dependencies]
