@@ -174,7 +174,7 @@ EMPTY_COLUMN = "—"
 EMBED_FIELD_BUDGET = 1000
 
 
-def _fit(lines: list[str], budget: int) -> tuple[list[str], int]:
+def fit_lines(lines: list[str], budget: int) -> tuple[list[str], int]:
     """As many lines as fit in the budget, and how many were left out.
 
     A field value is capped at 1024 characters: past a certain guild size a column has to
@@ -221,7 +221,7 @@ def _add_role_columns(
     hidden = 0
     for role in catalog.roles:
         lines = _column_lines(catalog, emojis, [row for row in rows if row[1].role_key == role.key])
-        shown, dropped = _fit(lines, EMBED_FIELD_BUDGET)
+        shown, dropped = fit_lines(lines, EMBED_FIELD_BUDGET)
         hidden += dropped
         embed.add_field(
             name=f"{emojis.rendered_role(role.key)} {role.label} · {len(lines)}",

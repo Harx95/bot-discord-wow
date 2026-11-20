@@ -3,23 +3,36 @@
 import logging
 from collections.abc import Sequence
 
+import aiohttp
 import aiosqlite
 import discord
 from discord.ext import commands
 
+from api import ForeverClient
 from bot.boards import BOARD_BUILDERS
 from bot.cogs.classes import Classes
 from bot.cogs.general import General
 from bot.cogs.polls import Polls
+from bot.cogs.professions import Professions
 from bot.emojis import EmojiStore
+from bot.professions import sync_professions
 from bot.reactions import ReactionVotes, reconcile
 from bot.rendering import Declaration, alternates_board_embed, main_board_embed
 from bot.tree import GuildCommandTree
 from bot.views.classes import AlternateClassButton, MainClassButton, RoleButton
 from bot.views.poll import CloseCancelButton, CloseConfirmButton
 from bot.views.proposals import ClearVotesButton, ProposeButton, VoteSelect
-from config import ClassCatalog, PollCatalog, Settings, load_catalog, load_classes
+from config import (
+    ClassCatalog,
+    PollCatalog,
+    ProfessionCatalog,
+    Settings,
+    load_catalog,
+    load_classes,
+    load_professions,
+)
 from db import ClassRepo, MessageRepo, apply_migrations, connect
+from domain import SyncReport
 
 _log = logging.getLogger(__name__)
 
@@ -52,8 +65,12 @@ class GuildBot(commands.Bot):
         # Loaded eagerly: a malformed polls.toml must fail at startup, not on a command.
         self.catalog: PollCatalog = load_catalog(settings.polls_file)
         self.classes: ClassCatalog = load_classes(settings.classes_file)
+        self.professions: ProfessionCatalog = load_professions(settings.professions_file)
         self.emojis_store = EmojiStore(self.classes, settings.guild_id)
         self._db: aiosqlite.Connection | None = None
+        # Both need a running event loop, so they are built in setup_hook.
+        self._api_session: aiohttp.ClientSession | None = None
+        self._forever: ForeverClient | None = None
 
     @property
     def db(self) -> aiosqlite.Connection:
@@ -61,6 +78,29 @@ class GuildBot(commands.Bot):
         if self._db is None:
             raise RuntimeError("Database not connected yet")
         return self._db
+
+    @property
+    def forever(self) -> ForeverClient:
+        """The Battle.net client. Only valid once setup_hook has run."""
+        if self._forever is None:
+            raise RuntimeError("Battle.net client not built yet")
+        return self._forever
+
+    async def sync_professions(self) -> SyncReport:
+        """Mirror the guild's professions from the API. Here so the cog stays thin."""
+        return await sync_professions(self)
+
+    def text_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        """A channel the bot can post embeds in, or None.
+
+        get_channel answers any channel kind, and a category or a forum has nothing to
+        send to. Narrowing it here keeps the one isinstance on discord objects in the
+        module that gets them, and lets the directory be tested without them.
+        """
+        channel = self.get_channel(channel_id)
+        if isinstance(channel, discord.TextChannel | discord.Thread):
+            return channel
+        return None
 
     @property
     def guild_object(self) -> discord.Object:
@@ -71,6 +111,13 @@ class GuildBot(commands.Bot):
         """Open the database, migrate it, load the cogs and push the command tree."""
         self._db = await connect(self.settings.database_path)
         applied = await apply_migrations(self._db)
+        self._api_session = aiohttp.ClientSession()
+        self._forever = ForeverClient(
+            region=self.settings.blizzard_region,
+            client_id=self.settings.blizzard_client_id,
+            client_secret=self.settings.blizzard_client_secret.get_secret_value(),
+            session=self._api_session,
+        )
         if applied:
             _log.info("Applied %d migration(s): %s", len(applied), ", ".join(applied))
 
@@ -91,6 +138,7 @@ class GuildBot(commands.Bot):
         await self.add_cog(Polls(self))
         await self.add_cog(Classes(self))
         await self.add_cog(ReactionVotes(self))
+        await self.add_cog(Professions(self))
 
         await self.emojis_store.refresh(self)
         # Reactions added or removed while the bot was down are never replayed, so the open
@@ -139,8 +187,8 @@ class GuildBot(commands.Bot):
         if managed is None:
             return
 
-        channel = self.get_channel(managed.channel_id)
-        if not isinstance(channel, discord.TextChannel | discord.Thread):
+        channel = self.text_channel(managed.channel_id)
+        if channel is None:
             _log.warning("Channel %d of board %r is gone", managed.channel_id, key)
             await messages.forget(key)
             return
@@ -156,10 +204,14 @@ class GuildBot(commands.Bot):
             _log.warning("Could not refresh board %r: %s", key, error)
 
     async def close(self) -> None:
-        """Close the database alongside the Discord connection."""
+        """Close the database and the API session alongside the Discord connection."""
         try:
             await super().close()
         finally:
+            if self._api_session is not None:
+                await self._api_session.close()
+                self._api_session = None
+                self._forever = None
             if self._db is not None:
                 await self._db.close()
                 self._db = None

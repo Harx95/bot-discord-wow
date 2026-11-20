@@ -171,3 +171,67 @@ class FakeSession:
 def as_session(session: FakeSession) -> aiohttp.ClientSession:
     """Hand a fake session to code that is typed for the real one."""
     return cast("aiohttp.ClientSession", session)
+
+
+# --- Discord channels and messages ----------------------------------------------------
+#
+# Enough of a text channel for the directory: it posts, it fetches, it edits, and it has
+# to cope with a message an officer deleted.
+
+
+@dataclass
+class FakeHttpResponse:
+    """The two attributes discord.HTTPException reads off a response."""
+
+    status: int = 404
+    reason: str = "Not Found"
+
+
+def not_found() -> discord.NotFound:
+    """The error Discord raises for a message that is no longer there."""
+    return discord.NotFound(cast("aiohttp.ClientResponse", FakeHttpResponse()), "Unknown Message")
+
+
+class FakeMessage:
+    """A message that reports its edits back to the channel holding it."""
+
+    def __init__(self, message_id: int, channel: "FakeChannel") -> None:
+        self.id = message_id
+        self._channel = channel
+
+    async def edit(self, *, embed: discord.Embed) -> None:
+        self._channel.edited.append((self.id, embed))
+
+
+class FakeChannel:
+    """A text channel that records what was posted and refuses the ids it was told to.
+
+    An id it has never posted is still fetched successfully: that is the ordinary case of a
+    message remembered from an earlier run. The ids in `deleted` are the ones an officer
+    removed, and they raise NotFound.
+    """
+
+    def __init__(self, channel_id: int = 500, deleted: set[int] | None = None) -> None:
+        self.id = channel_id
+        self.mention = f"<#{channel_id}>"
+        self.sent: list[tuple[int, discord.Embed]] = []
+        self.edited: list[tuple[int, discord.Embed]] = []
+        self.fetched: list[int] = []
+        self.deleted = deleted or set()
+        self._next_id = 1000
+
+    async def send(self, *, embed: discord.Embed) -> FakeMessage:
+        self._next_id += 1
+        self.sent.append((self._next_id, embed))
+        return FakeMessage(self._next_id, self)
+
+    async def fetch_message(self, message_id: int) -> FakeMessage:
+        self.fetched.append(message_id)
+        if message_id in self.deleted:
+            raise not_found()
+        return FakeMessage(message_id, self)
+
+
+def as_channel(channel: FakeChannel) -> discord.TextChannel:
+    """Hand a fake channel to code that is typed for the real one."""
+    return cast("discord.TextChannel", channel)

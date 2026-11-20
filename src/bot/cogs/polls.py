@@ -7,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.permissions import staff_only
+from bot.permissions import missing_permissions, staff_only
 from bot.reactions import add_ballot_reactions, fetch_poll_message
 from bot.rendering import poll_embed, results_embed
 from bot.views.poll import build_close_confirmation_view
@@ -76,14 +76,6 @@ STILL_DISPLAYED = (
     "Va au message existant, ou supprime-le d'abord si tu veux repartir de zéro."
 )
 
-PERMISSION_LABELS = {
-    "send_messages": "« Envoyer des messages »",
-    "embed_links": "« Intégrer des liens »",
-    "add_reactions": "« Ajouter des réactions »",
-    "read_message_history": "« Voir les anciens messages »",
-    "manage_messages": "« Gérer les messages »",
-}
-
 # Everything a poll message needs, in the order the refusal lists them. A menu poll asks
 # for less: nothing posts a reaction on it, so nothing has to remove one either.
 REQUIRED_PERMISSIONS = (
@@ -109,7 +101,7 @@ def _missing_permissions(
 ) -> list[str]:
     """The permissions this poll's message needs and does not have, in French."""
     needed = REQUIRED_PERMISSIONS if definition.votes_by_reaction else REQUIRED_MENU_PERMISSIONS
-    return [PERMISSION_LABELS[name] for name in needed if not getattr(permissions, name)]
+    return missing_permissions(permissions, needed)
 
 
 class Polls(commands.Cog):
