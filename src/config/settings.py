@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     gm_role_id: int = Field(description="Role allowed to run staff commands, alongside officers")
     officer_role_id: int = Field(description="Officer role, allowed to run staff commands")
 
+    guild_name: str = Field(
+        default="Ah sheep here wego again",
+        description="Guild name, spelled the way the game spells it",
+    )
+    guild_tag: str = Field(
+        default="ASHWGA",
+        description="Short form of the guild name, for titles and footers",
+    )
+
     log_level: str = Field(default="INFO", description="Root logging level")
     polls_file: Path = Field(
         default=Path("polls.toml"),
@@ -38,6 +47,18 @@ class Settings(BaseSettings):
         default=Path("data/bot.db"),
         description="SQLite file; the parent directory is created on startup",
     )
+
+    @property
+    def guild_api_slug(self) -> str:
+        """The guild name the way the Battle.net API addresses it.
+
+        Blizzard lowercases the name, drops apostrophes and collapses whitespace into single
+        hyphens, so "Ah sheep here wego again" is reached as "ah-sheep-here-wego-again".
+        lower() rather than casefold(): Blizzard folds case the way en-US does, which leaves
+        a sharp s alone where casefold() would turn it into "ss".
+        """
+        folded = self.guild_name.strip().lower().replace("'", "").replace("\u2019", "")
+        return "-".join(folded.split())
 
     @property
     def staff_role_ids(self) -> frozenset[int]:

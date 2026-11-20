@@ -1,6 +1,7 @@
 # bot-discord-wow
 
-Bot Discord de guilde pour WoW Forever.
+Bot Discord de la guilde **Ah sheep here wego again** (ASHWGA) sur WoW Forever,
+ruleset JcJ, region Europe.
 
 ## Installation
 

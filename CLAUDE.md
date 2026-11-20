@@ -1,6 +1,7 @@
-# Bot de guilde — WoW Forever
+# Bot de guilde — Ah sheep here wego again (ASHWGA)
 
-Bot Discord pour une guilde WoW Forever (sortie du jeu le 4 novembre 2026).
+Bot Discord de la guilde **Ah sheep here wego again**, acronyme **ASHWGA**, sur
+WoW Forever (sorti le 4 novembre 2026), ruleset JcJ, région Europe.
 Gère les sondages de pré-lancement, l'attribution des classe, des métiers, des rôles
 et un annuaire des métiers.
 
