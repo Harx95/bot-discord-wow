@@ -16,6 +16,9 @@ from domain.text import fold
 # A select menu holds 25 options, and an embed 25 fields: no answer may exceed either.
 ANSWER_LIMIT = 25
 
+# A refusal names the recipes it found rather than counting them, so a couple is plenty.
+NAMED_LIMIT = 3
+
 
 def _to_character(row: aiosqlite.Row) -> RosterCharacter:
     """Build a domain entity from a database row."""
@@ -361,6 +364,30 @@ class ProfessionRepo:
         ) as cursor:
             row = await cursor.fetchone()
         return row["n"] if row else 0
+
+    async def named_recipes(self, query: str, limit: int = NAMED_LIMIT) -> list[Recipe]:
+        """Recipes the dictionary knows by that name, whether anybody knows them or not.
+
+        The counterpart of artisans_for(): it answers off the permanent dictionary, which is
+        exactly what tells "nobody in the guild knows this recipe" apart from "no recipe is
+        called that". A name is never promised as an artisan, only as a name.
+        """
+        term = fold(query)
+        if not term:
+            return []
+
+        async with self._db.execute(
+            """
+            SELECT DISTINCT r.*
+            FROM recipe_terms t
+            JOIN recipes r ON r.recipe_id = t.recipe_id
+            WHERE t.term LIKE '%' || ? || '%'
+            ORDER BY COALESCE(r.name_fr, r.name_en) COLLATE NOCASE
+            LIMIT ?
+            """,
+            (term, limit),
+        ) as cursor:
+            return [_to_recipe(row) for row in await cursor.fetchall()]
 
     async def known_recipes(self, slug: str, blizzard_id: int) -> list[Recipe]:
         """Every recipe one character knows in one profession, French name first."""

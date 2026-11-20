@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from api import ForeverApiError
+from bot.crafters import who_can_craft
 from bot.directory import GUILD_TIMEZONE, publish_directory, refresh_directory
 from bot.permissions import missing_permissions, staff_only
 
@@ -24,11 +25,16 @@ REQUIRED_PERMISSIONS = ("send_messages", "embed_links", "read_message_history")
 # A message is capped at 2000 characters, and a long list of incidents could reach it.
 MESSAGE_LIMIT = 2000
 
+# A one-letter search would match most of the dictionary, so Discord refuses it for us.
+QUERY_MIN = 2
+QUERY_MAX = 100
+
 NO_CHANNEL = (
     "Le salon des métiers est introuvable. Vérifie PROFESSIONS_CHANNEL_ID : il vaut "
     "actuellement {channel_id}."
 )
 MISSING_PERMISSIONS = "Il me manque des permissions dans {channel}. Manquantes : {missing}."
+WRONG_CHANNEL = "Cette commande ne fonctionne que dans {channel}."
 PUBLISHED = "Annuaire à jour dans {channel} : {posted} message(s) posté(s), {edited} mis à jour."
 SYNC_FAILED = "La synchronisation a échoué : {reason}"
 SYNCED = (
@@ -150,3 +156,40 @@ class Professions(commands.Cog):
             )
 
         await interaction.followup.send(answer[:MESSAGE_LIMIT], ephemeral=True)
+
+    # --- member commands ----------------------------------------------------------------
+
+    async def _outside_channel(self, interaction: discord.Interaction) -> bool:
+        """True when the command was run elsewhere, having already said so.
+
+        Named by mention rather than fetched: the refusal has to work even when the channel
+        is not in the cache, and a mention renders as a link either way.
+        """
+        channel_id = self.bot.settings.professions_channel_id
+        if interaction.channel_id == channel_id:
+            return False
+
+        await interaction.response.send_message(
+            WRONG_CHANNEL.format(channel=f"<#{channel_id}>"),
+            ephemeral=True,
+        )
+        return True
+
+    @app_commands.command(
+        name="qui-métier",
+        description="Trouve qui, dans la guilde, peut fabriquer un objet.",
+    )
+    @app_commands.describe(objet="Nom de l'objet ou de la recette, en français ou en anglais")
+    async def who_crafts(
+        self,
+        interaction: discord.Interaction,
+        objet: app_commands.Range[str, QUERY_MIN, QUERY_MAX],
+    ) -> None:
+        """Answer from the database only, and only to the member who asked."""
+        if await self._outside_channel(interaction):
+            return
+
+        # Ephemeral throughout: that alone is what keeps one member's searches to themselves.
+        await interaction.response.defer(ephemeral=True)
+        embed = await who_can_craft(self.bot, objet)
+        await interaction.followup.send(embed=embed, ephemeral=True)

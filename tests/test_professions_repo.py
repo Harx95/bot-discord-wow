@@ -352,6 +352,33 @@ async def test_the_search_reports_the_profession_and_the_skill(
     assert artisan.recipe_name == "Gilet rouge en tisse-mage"
 
 
+async def test_the_dictionary_can_be_searched_apart_from_the_artisans(
+    professions: ProfessionRepo,
+) -> None:
+    """What tells "nobody knows it any more" apart from "no recipe is called that"."""
+    await _seed(professions)
+    await professions.replace_roster([])
+
+    assert await professions.artisans_for("gilet rouge") == []
+    named = await professions.named_recipes("gilet rouge")
+    assert [recipe.display_name for recipe in named] == ["Gilet rouge en tisse-mage"]
+
+
+async def test_the_dictionary_search_ignores_case_and_accents_too(
+    professions: ProfessionRepo,
+) -> None:
+    await _seed(professions)
+
+    assert len(await professions.named_recipes("GILET ROUGE EN TISSE MAGE")) == 1
+
+
+async def test_an_unknown_name_is_not_in_the_dictionary_either(professions: ProfessionRepo) -> None:
+    await _seed(professions)
+
+    assert await professions.named_recipes("Flask of the Titans") == []
+    assert await professions.named_recipes("  ") == []
+
+
 # --- /recettes ------------------------------------------------------------------------
 
 
