@@ -325,6 +325,21 @@ async def test_matches_counts_recipes_not_artisans(professions: ProfessionRepo) 
     assert len(await professions.artisans_for("gilet rouge en tisse-mage")) == 2
 
 
+async def test_a_recipe_nobody_knows_any_more_is_not_counted(
+    professions: ProfessionRepo,
+) -> None:
+    """The dictionary keeps rows for ever, so counting it directly would promise an artisan
+    that artisans_for() cannot produce -- after a departure, or a profession left untracked.
+    """
+    await _seed(professions)
+
+    await professions.replace_roster([MHAS])
+    await professions.replace_character_professions(MHAS.slug, [], [])
+
+    assert await professions.artisans_for("gilet rouge") == []
+    assert await professions.recipe_matches("gilet rouge") == 0
+
+
 async def test_the_search_reports_the_profession_and_the_skill(
     professions: ProfessionRepo,
 ) -> None:

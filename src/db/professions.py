@@ -341,15 +341,21 @@ class ProfessionRepo:
             ]
 
     async def recipe_matches(self, query: str) -> int:
-        """How many distinct recipes match, so an answer can say what it left out."""
+        """How many distinct recipes match and are known by somebody.
+
+        Counted through character_recipes rather than off the dictionary: a recipe stays in
+        the dictionary for ever, so one whose profession the guild stopped tracking, or whose
+        only owner left, would otherwise be counted while artisans_for() answered nobody.
+        """
         term = fold(query)
         if not term:
             return 0
         async with self._db.execute(
             """
-            SELECT COUNT(DISTINCT recipe_id) AS n
-            FROM recipe_terms
-            WHERE term LIKE '%' || ? || '%'
+            SELECT COUNT(DISTINCT t.recipe_id) AS n
+            FROM recipe_terms t
+            JOIN character_recipes cr ON cr.recipe_id = t.recipe_id
+            WHERE t.term LIKE '%' || ? || '%'
             """,
             (term,),
         ) as cursor:

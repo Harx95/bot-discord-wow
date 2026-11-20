@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from config import ProfessionCatalog, ProfessionKind, load_professions
+from config import ProfessionCatalog, load_professions
 
 # Read off the live API on 20 November 2026, on the whole roster.
 LIVE_IDS = {171, 164, 333, 202, 182, 165, 186, 393, 197, 185, 129, 356}
@@ -24,16 +24,32 @@ def test_every_id_the_api_answered_with_is_known(
     assert set(professions_catalog.blizzard_ids) == LIVE_IDS
 
 
-def test_the_three_secondaries_are_marked_as_such(
+def test_the_three_professions_the_guild_does_not_track_are_ignored(
     professions_catalog: ProfessionCatalog,
 ) -> None:
-    secondaries = [
-        profession.key
-        for profession in professions_catalog.professions
-        if profession.kind is ProfessionKind.SECONDARY
-    ]
+    """Nearly everyone has them, so they buried the real answers."""
+    ignored = [p.key for p in professions_catalog.professions if p.ignored]
 
-    assert secondaries == ["cooking", "first_aid", "fishing"]
+    assert ignored == ["cooking", "first_aid", "fishing"]
+    assert professions_catalog.ignored_ids == frozenset({185, 129, 356})
+
+
+def test_the_directory_shows_the_nine_tracked_professions(
+    professions_catalog: ProfessionCatalog,
+) -> None:
+    tracked = professions_catalog.tracked
+
+    assert len(tracked) == 9
+    assert not any(profession.ignored for profession in tracked)
+
+
+def test_an_ignored_profession_is_still_listed_so_it_is_not_taken_for_an_unknown_id(
+    professions_catalog: ProfessionCatalog,
+) -> None:
+    cooking = professions_catalog.by_id(185)
+
+    assert cooking is not None
+    assert cooking.name == "Cuisine"
 
 
 def test_lookup_by_key_and_by_api_id_agree(professions_catalog: ProfessionCatalog) -> None:
@@ -60,12 +76,14 @@ def test_the_label_carries_the_emoji(professions_catalog: ProfessionCatalog) -> 
 
 def test_file_order_is_the_directory_order(professions_catalog: ProfessionCatalog) -> None:
     assert professions_catalog.order_of(171) == 0
-    assert professions_catalog.order_of(356) == 11
+    assert professions_catalog.order_of(393) == 8
 
 
-def test_an_unknown_id_sorts_last(professions_catalog: ProfessionCatalog) -> None:
-    """A profession Blizzard adds still appears, after the configured ones."""
-    assert professions_catalog.order_of(999) == len(professions_catalog.professions)
+def test_an_unknown_id_sorts_after_the_tracked_ones(
+    professions_catalog: ProfessionCatalog,
+) -> None:
+    """A profession Blizzard adds still appears, after the ones the guild tracks."""
+    assert professions_catalog.order_of(999) == len(professions_catalog.tracked)
 
 
 def test_duplicate_keys_are_refused() -> None:
@@ -73,8 +91,8 @@ def test_duplicate_keys_are_refused() -> None:
         ProfessionCatalog.model_validate(
             {
                 "professions": [
-                    {"key": "a", "blizzard_id": 1, "name": "A", "kind": "primary"},
-                    {"key": "a", "blizzard_id": 2, "name": "B", "kind": "primary"},
+                    {"key": "a", "blizzard_id": 1, "name": "A"},
+                    {"key": "a", "blizzard_id": 2, "name": "B"},
                 ]
             }
         )
@@ -86,17 +104,10 @@ def test_duplicate_api_ids_are_refused() -> None:
         ProfessionCatalog.model_validate(
             {
                 "professions": [
-                    {"key": "a", "blizzard_id": 1, "name": "A", "kind": "primary"},
-                    {"key": "b", "blizzard_id": 1, "name": "B", "kind": "secondary"},
+                    {"key": "a", "blizzard_id": 1, "name": "A"},
+                    {"key": "b", "blizzard_id": 1, "name": "B"},
                 ]
             }
-        )
-
-
-def test_an_unknown_kind_is_refused() -> None:
-    with pytest.raises(ValidationError):
-        ProfessionCatalog.model_validate(
-            {"professions": [{"key": "a", "blizzard_id": 1, "name": "A", "kind": "tertiary"}]}
         )
 
 
@@ -110,7 +121,6 @@ def test_an_unknown_field_is_refused() -> None:
                         "key": "a",
                         "blizzard_id": 1,
                         "name": "A",
-                        "kind": "primary",
                         "colour": "#ffffff",
                     }
                 ]

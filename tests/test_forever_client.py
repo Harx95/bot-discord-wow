@@ -264,6 +264,41 @@ async def test_the_tier_cap_is_read_rather_than_assumed() -> None:
     assert (result[0][0].skill, result[0][0].max_skill) == (212, 225)
 
 
+async def test_an_ignored_profession_never_reaches_the_caller() -> None:
+    """First Aid is in the payload; the guild does not track it, so nothing about it lands."""
+    session = FakeSession({PROFESSIONS_PATH: FakeResponse(body=PROFESSIONS_BODY)})
+
+    result = await _client(session).character_professions("rka-kamechki", ignore=frozenset({129}))
+
+    assert result is not None
+    professions, recipes = result
+    assert [p.blizzard_id for p in professions] == [197]
+    assert all(blizzard_id == 197 for blizzard_id, _, _ in recipes)
+    assert not any(recipe_id == 1838 for _, recipe_id, _ in recipes)
+
+
+async def test_ignoring_is_a_denylist_so_an_unconfigured_profession_still_arrives() -> None:
+    """A profession Blizzard adds must show up under its API name, not vanish."""
+    body = {"primaries": [{"profession": {"id": 999, "name": "Jewelcrafting"}, "tiers": []}]}
+    session = FakeSession({PROFESSIONS_PATH: FakeResponse(body=body)})
+
+    result = await _client(session).character_professions(
+        "rka-kamechki", ignore=frozenset({129, 185, 356})
+    )
+
+    assert result is not None
+    assert [p.api_name for p in result[0]] == ["Jewelcrafting"]
+
+
+async def test_nothing_is_ignored_by_default() -> None:
+    session = FakeSession({PROFESSIONS_PATH: FakeResponse(body=PROFESSIONS_BODY)})
+
+    result = await _client(session).character_professions("rka-kamechki")
+
+    assert result is not None
+    assert [p.blizzard_id for p in result[0]] == [197, 129]
+
+
 async def test_a_character_the_api_hides_is_none() -> None:
     session = FakeSession({})
 

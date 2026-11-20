@@ -32,7 +32,6 @@ from config.polls import (
 from config.professions import (
     ProfessionCatalog,
     ProfessionDefinition,
-    ProfessionKind,
     load_professions,
 )
 from config.settings import Settings, get_settings
@@ -49,7 +48,6 @@ __all__ = [
     "PollDefinition",
     "ProfessionCatalog",
     "ProfessionDefinition",
-    "ProfessionKind",
     "ProposalRejection",
     "ProposalRules",
     "RoleDefinition",

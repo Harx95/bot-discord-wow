@@ -299,7 +299,9 @@ class ForeverClient:
         return ruleset.get("id"), _localised(ruleset.get("name"), "fr_FR")
 
     async def character_professions(
-        self, slug: str
+        self,
+        slug: str,
+        ignore: frozenset[int] = frozenset(),
     ) -> tuple[list[CharacterProfession], list[tuple[int, int, str]]] | None:
         """One character's professions, and the recipes they know.
 
@@ -307,6 +309,11 @@ class ForeverClient:
         endpoint carries the English name, so nothing has to be fetched before a recipe is
         searchable. None when the character is not published -- below level 10, or never
         logged out.
+
+        `ignore` holds the profession ids the guild does not track, dropped here so nothing
+        about them is ever stored or searched. It is an ignore list rather than a keep list
+        on purpose: a profession nobody configured still comes through, under the name the
+        API gave it, instead of disappearing silently.
         """
         payload = await self._get(
             f"/profile/wow/character/{encode_slug(slug)}/professions", self.profile_namespace
@@ -326,7 +333,7 @@ class ForeverClient:
                     continue
                 profession = entry.get("profession") or {}
                 blizzard_id = profession.get("id")
-                if not isinstance(blizzard_id, int):
+                if not isinstance(blizzard_id, int) or blizzard_id in ignore:
                     continue
                 api_name = _english(profession.get("name")) or f"#{blizzard_id}"
 

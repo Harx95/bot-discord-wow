@@ -6,7 +6,6 @@ shown, under the name the API gave it.
 """
 
 import tomllib
-from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
@@ -19,17 +18,6 @@ NAME_LIMIT = 100
 MAX_PROFESSIONS = 25
 
 
-class ProfessionKind(StrEnum):
-    """Which block of the directory a profession belongs to.
-
-    Vanilla caps the primaries at two per character and leaves the secondaries unlimited,
-    which is the only reason the directory groups them apart.
-    """
-
-    PRIMARY = "primary"
-    SECONDARY = "secondary"
-
-
 class ProfessionDefinition(BaseModel):
     """One profession, as the directory shows it."""
 
@@ -39,12 +27,10 @@ class ProfessionDefinition(BaseModel):
     # The skill line id the profile API answers with.
     blizzard_id: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=NAME_LIMIT)
-    kind: ProfessionKind
+    # Kept out of the directory, the database and every search. Still listed here, so the
+    # sync knows it is a deliberate omission rather than an id nobody configured.
+    ignored: bool = False
     emoji: str | None = None
-
-    @property
-    def is_primary(self) -> bool:
-        return self.kind is ProfessionKind.PRIMARY
 
     @property
     def label(self) -> str:
@@ -75,6 +61,16 @@ class ProfessionCatalog(BaseModel):
 
         return self
 
+    @property
+    def tracked(self) -> list[ProfessionDefinition]:
+        """The professions the directory shows, in file order."""
+        return [profession for profession in self.professions if not profession.ignored]
+
+    @property
+    def ignored_ids(self) -> frozenset[int]:
+        """The API ids to drop on sight, so nothing about them is ever stored."""
+        return frozenset(p.blizzard_id for p in self.professions if p.ignored)
+
     def get(self, key: str) -> ProfessionDefinition | None:
         """Look up one profession by its configured key."""
         return next((p for p in self.professions if p.key == key), None)
@@ -90,12 +86,16 @@ class ProfessionCatalog(BaseModel):
 
     @property
     def blizzard_ids(self) -> list[int]:
-        """Every configured Blizzard id, in file order."""
+        """Every configured Blizzard id, in file order, ignored ones included."""
         return [profession.blizzard_id for profession in self.professions]
 
     def order_of(self, blizzard_id: int) -> int:
-        """Where a profession sits in the directory. Unknown ids sort last, together."""
-        ids = self.blizzard_ids
+        """Where a profession sits in the directory.
+
+        An id this file does not list still reaches the directory, after the tracked ones:
+        a profession Blizzard adds should show up rather than vanish.
+        """
+        ids = [profession.blizzard_id for profession in self.tracked]
         return ids.index(blizzard_id) if blizzard_id in ids else len(ids)
 
 
