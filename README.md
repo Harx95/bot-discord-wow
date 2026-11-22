@@ -8,14 +8,42 @@ ruleset JcJ, region Europe.
 ```sh
 python3.13 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-cp .env.example .env   # puis renseigner DISCORD_TOKEN et GUILD_ID
+cp .env.example .env
 ```
+
+Puis remplir `.env`. Trois valeurs n'ont pas de défaut et sont à récupérer sur
+leurs portails — `DISCORD_TOKEN`, `BLIZZARD_CLIENT_ID` et
+`BLIZZARD_CLIENT_SECRET` : le bot refuse de démarrer s'il en manque une, avec
+une erreur de validation qui les nomme. Les identifiants du serveur
+(`GUILD_ID`, `GM_ROLE_ID`, `OFFICER_ROLE_ID`) sont dans `ROADMAP.md`.
+
+Les deux identifiants Battle.net se créent sur
+[develop.battle.net](https://develop.battle.net) : un client de type
+`client_credentials`, sans URL de redirection.
 
 ## Lancement
 
 ```sh
 .venv/bin/python -m bot
 ```
+
+## Déploiement
+
+Le bot tourne sur un VPS Debian, en service systemd `bot-wow.service`. Tout le
+déploiement tient en une commande, **à lancer sur le VPS** :
+
+```sh
+./scripts/reboot.sh --update   # git pull, vérifie le .env, redémarre, montre le journal
+./scripts/reboot.sh            # redémarre seulement
+```
+
+Le service porte `Restart=always` : un bot qui refuse de démarrer est relancé
+sans fin, et `systemctl restart` rend la main sans erreur. Le script compte donc
+les relances pendant quelques secondes et le dit, au lieu d'annoncer un succès.
+Il vérifie aussi que les réglages obligatoires sont présents dans le `.env` de la
+machine — qui n'est pas dans le dépôt — avant de toucher au service.
+
+Le nom du service se surcharge : `BOT_SERVICE=autre.service ./scripts/reboot.sh`.
 
 ## Vérifications
 
@@ -164,3 +192,90 @@ Les classes envisagées sont enregistrées en base et comptées à part dans
 Le bot ne peut attribuer que des rôles situés **sous** le sien dans la
 hiérarchie. Les rôles de classe sont créés tout en bas, donc c'est acquis ;
 en revanche il ne peut pas attribuer Membre, Officier ni Maître de guilde.
+
+## Métiers
+
+Les métiers viennent de l'**API Battle.net**, pas d'une déclaration : personne ne
+saisit quoi que ce soit. Une synchro quotidienne lit le roster de la guilde, les
+métiers de chaque personnage et les recettes qu'il connaît, puis écrit tout en
+base. Les commandes ne lisent que la base et n'appellent jamais Blizzard.
+
+Les métiers suivis, leur nom français, leur emoji et leur ordre d'affichage sont
+dans `professions.toml`, validé au démarrage.
+
+| Commande | Qui | Effet |
+|---|---|---|
+| `/synchro-métiers` | GM, Officier | Force une synchro immédiate et rend un compte-rendu |
+| `/annuaire-métiers` | GM, Officier | Poste ou met à jour l'annuaire dans le salon des métiers |
+| `/qui-métier <objet>` | Tout le monde | Qui peut fabriquer cet objet, en français ou en anglais |
+| `/recettes <personnage> <métier>` | Tout le monde | Toutes les recettes apprises par ce personnage dans ce métier |
+
+### L'annuaire
+
+`PROFESSIONS_CHANNEL_ID` désigne le salon. L'annuaire y tient **un message par
+métier suivi**, posté une fois puis édité — jamais reposté, pour que l'ordre des
+messages ne change pas d'un jour à l'autre. Un métier que personne n'exerce reste
+affiché, vide, pour la même raison.
+
+La réécriture espace les éditions d'environ une seconde : Discord plafonne vers 5
+éditions par 5 secondes et par salon. Un message supprimé à la main est oublié en
+base, et `/annuaire-métiers` le repose.
+
+La synchro automatique part tous les jours à l'heure de `PROFESSION_SYNC_HOUR`
+(5 h par défaut), **heure de Paris**, changement d'heure compris.
+
+### Les deux commandes de membre
+
+Elles ne répondent que dans le salon des métiers, et toujours en **éphémère** :
+c'est ce qui permet de laisser les membres les lancer là sans pouvoir y écrire,
+sans qu'ils voient les recherches des autres. Il faut donc, dans ce salon :
+refuser « Envoyer des messages » à `@everyone` et lui autoriser « Utiliser les
+commandes d'application ».
+
+`/qui-métier` cherche sur le nom de la recette **et** sur celui de l'objet
+fabriqué, dans les deux langues, sans tenir compte des accents ni de la casse, et
+sur un morceau de nom suffit. Les réponses sont groupées par recette, car une
+recherche vague en touche souvent plusieurs. Deux recettes qui portent le même nom
+sont fusionnées : les métiers de récolte ont une pseudo-recette par palier, toutes
+nommées pareil.
+
+Quand personne ne peut fabriquer l'objet, la réponse distingue deux cas : un nom
+qu'aucune recette ne porte, et une recette que la guilde connaissait mais que plus
+personne ne sait faire — la personne est partie, ou son métier n'est pas suivi.
+
+`/recettes` propose les personnages en autocomplétion, puis **les métiers de ce
+personnage-là**. Une liste trop longue se poursuit sur plusieurs embeds du même
+message ; les 6000 caractères d'un message sont partagés par tous ses embeds, pas
+accordés à chacun, donc la liste est budgétée une fois et le pied annonce ce qui
+manque.
+
+### Les noms de recettes
+
+Le profil d'un personnage répond **toujours en anglais**, même en demandant
+`locale=fr_FR`. Le français vient d'un second appel, aux données statiques, qui
+rend le nom en douze langues.
+
+Un nom de recette ne changeant jamais, la table `recipes` est un dictionnaire
+permanent : la synchro ne demande que les identifiants jamais vus. Le premier
+jour coûte donc quelques centaines de requêtes, les suivants une vingtaine. Une
+recette non encore traduite reste affichée et trouvable sous son nom anglais.
+
+### Métiers non suivis
+
+Cuisine, Secourisme et Pêche portent `ignored = true` dans `professions.toml` :
+rien à leur sujet n'entre en base, l'annuaire ne les montre pas et la recherche ne
+les voit pas. Presque tout le monde les a, et elles noyaient les vraies réponses —
+« bandage en lin » répondait 18 des 25 personnages.
+
+C'est une liste d'exclusion, pas une liste d'inclusion : un métier que Blizzard
+ajouterait remonterait quand même, sous son nom anglais et avec un avertissement
+au journal pour qu'on complète le fichier.
+
+### Limites de l'API
+
+L'API ne publie un personnage qu'**à partir du niveau 10**, et seulement après une
+déconnexion : un personnage frais apparaît au roster sans métier, et le
+compte-rendu de synchro le compte comme ignoré. Le namespace `forever` n'est pas
+documenté : les contrats ont été mesurés sur la guilde et peuvent changer sans
+préavis. Une synchro ratée laisse la base dans l'état de la veille plutôt que de
+la vider.

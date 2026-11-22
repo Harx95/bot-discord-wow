@@ -18,6 +18,7 @@ Feuille de route : ROADMAP.md — ne traite QUE l'étape demandée.
 ## Architecture
 
 - `src/bot/` — cogs et vues discord.py
+- `src/api/` — client de l'API Battle.net, seul endroit qui parle au réseau
 - `src/db/` — repositories, un par agrégat
 - `src/domain/` — dataclasses frozen, aucune dépendance à discord.py
 - `migrations/` — SQL versionné, seul endroit où du DDL est autorisé
@@ -27,6 +28,8 @@ Règles :
   jamais des modèles pydantic.
 - Le SQL vit dans les repositories. Aucune requête ailleurs.
 - Les cogs ne parlent jamais à la base directement, ils passent par un repository.
+- Les commandes n'appellent jamais l'API : elles lisent la base, que la synchro
+  quotidienne remplit. `src/api/` n'est utilisé que par la synchro.
 
 ## Contraintes discord.py
 

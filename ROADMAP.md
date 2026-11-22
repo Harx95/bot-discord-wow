@@ -3,14 +3,17 @@
 Une étape à la fois. Ne pas anticiper les suivantes.
 Chaque étape se termine par : test manuel réussi, puis commit, puis rendu d'explication technique court et concis.
 
-## Où on en est — 15 novembre 2026
+## Où on en est — 22 novembre 2026
 
 Le jeu est sorti le 4 novembre. Les sondages sont clos et leurs messages
-conservés sur le serveur. Le bot tourne sur le VPS. La guilde s'appelle
-« Ah sheep here wego again ».
+conservés sur le serveur. Le bot tourne sur le VPS, en service systemd
+`bot-wow.service`. La guilde s'appelle « Ah sheep here wego again ».
 
-**En cours : l'étape 6**, l'annuaire des métiers, refondu autour de l'API
-Blizzard : plus aucune saisie par les membres, tout vient du jeu.
+**L'étape 6 est écrite et testée** : l'annuaire des métiers, refondu autour de
+l'API Blizzard, plus aucune saisie par les membres. Les étapes 6a à 6c sont
+déployées et vérifiées sur le serveur ; `/qui-métier` et `/recettes` (6d, 6e)
+attendent le prochain déploiement — `./scripts/reboot.sh --update` sur le VPS,
+puis le scénario de recette de l'étape 6.
 
 ### Historique — 1er octobre 2026
 
@@ -33,15 +36,23 @@ python3.13 -m venv .venv
 cp .env.example .env
 ```
 
-Puis remplir `.env`. Trois valeurs sont déjà connues, seul le token est à
-récupérer sur le portail développeur Discord :
+Puis remplir `.env`. Les identifiants du serveur sont connus ; le token Discord
+et les deux identifiants Battle.net sont à récupérer sur leurs portails
+respectifs. Aucun des trois n'a de valeur par défaut : le bot refuse de démarrer
+s'il en manque un, avec une erreur de validation qui les nomme.
 
 ```
-DISCORD_TOKEN=   <- à récupérer, jamais commité
+DISCORD_TOKEN=            <- portail développeur Discord, jamais commité
+BLIZZARD_CLIENT_ID=       <- develop.battle.net, client client_credentials
+BLIZZARD_CLIENT_SECRET=   <- idem, jamais commité
 GUILD_ID=1551290844685017161
 GM_ROLE_ID=1551972951769747456        (rôle « Maître de guilde »)
 OFFICER_ROLE_ID=1551968511562227833   (rôle « Officier »)
 ```
+
+Le salon des métiers (`1551292696784535712`) et l'heure de synchro (5 h) ont
+leurs valeurs par défaut dans le code : `.env.example` les montre en commentaire,
+à décommenter seulement pour les changer.
 
 Vérifier que tout passe : `.venv/bin/pytest`, `.venv/bin/ruff check src tests`,
 `.venv/bin/pyright`.
@@ -96,6 +107,19 @@ serveur, le bot ne peut pas s'en charger :
   une édition, et Discord en limite environ 5 par 5 secondes par salon. À trente
   votants dans la même minute l'affichage prendra du retard, sans rien perdre en
   base. À traiter si ça se produit vraiment, pas avant.
+- **L'API ne voit pas les personnages sous le niveau 10**, et seulement après une
+  déconnexion. Un personnage frais apparaît donc au roster sans métier, et
+  l'annuaire le compte comme ignoré. Rien à corriger : c'est le jeu qui décide.
+- **Le namespace `forever` n'est pas documenté.** Les contrats ont été mesurés
+  sur la guilde, pas lus : ils peuvent changer sans préavis. Un champ absent est
+  traité comme une donnée manquante, et une synchro ratée laisse la base dans
+  l'état de la veille.
+- **Les noms français des métiers sont écrits dans `professions.toml`**, alors
+  que `static-forever-eu` les donne. Un métier ajouté par Blizzard s'affiche donc
+  sous son nom anglais jusqu'à ce qu'on complète le fichier.
+- **Le fuseau de la synchro est une constante**, `Europe/Paris` dans
+  `bot/directory.py`, là où l'heure est un réglage. À passer en réglage si la
+  guilde déménage de fuseau, pas avant.
 
 ## Contrainte de calendrier
 
@@ -112,10 +136,15 @@ Les étapes 1 à 5 sont donc prioritaires. L'étape 6 peut attendre la sortie.
 
 ## Questions ouvertes
 
-- Hébergement final : VPS, Raspberry Pi ou plateforme ? (avant l'étape 5)
+Aucune pour l'instant.
 
 ## Décisions prises
 
+- **Hébergement** : VPS Debian, utilisateur `debian`, dépôt dans
+  `/home/debian/bot-discord-wow`, service systemd `bot-wow.service` avec
+  `Restart=always`. Le déploiement tient en une commande à lancer sur le VPS :
+  `./scripts/reboot.sh --update` (git pull, vérification du `.env`, redémarrage,
+  journal). Le `.env` n'est pas dans le dépôt et vit uniquement sur la machine.
 - **Création de sondages depuis Discord** : approche mixte retenue. `polls.toml`
   reste la source des sondages structurants d'avant-lancement (faction, royaume), dont les clés sont inscrites en base et dans les boutons. Une
   commande de création à la volée, pour les sondages ponctuels d'après-sortie,
@@ -465,74 +494,139 @@ qu'elle vaut d'être vue au moins une fois.
 
 ## Étape 6 — Annuaire des métiers
 
-Refondue le 15 novembre, après la sortie. La version d'origine faisait déclarer
-ses métiers à chaque membre ; l'API Blizzard de WoW Forever les donne
-directement, compétence comprise. Plus de saisie, plus de rôles Discord de
-métier : l'annuaire reflète le jeu.
+Refondue le 15 novembre, puis réécrite le 22 novembre une fois l'API sondée pour
+de vrai. La version d'origine faisait déclarer ses métiers à chaque membre ;
+l'API Blizzard de WoW Forever les donne directement, compétence **et recettes
+apprises** comprises. Plus de saisie, plus de rôles Discord de métier :
+l'annuaire reflète le jeu.
 
-Ce que l'API impose :
+Elle absorbe l'ancienne étape 7 : les recettes arrivent dans la même réponse que
+les métiers, les jeter pour les redemander plus tard n'avait aucun sens.
 
-- **Namespaces propres à Forever** : `profile-forever-eu`, `static-forever-eu`.
-  Seule la région EU connaît nos personnages.
-- **Pas de royaume** : un personnage s'appelle `{prénom}-{nom}`, par exemple
-  `harx-windharrow`. Le roster de la guilde donne ces slugs.
-- **Les noms de métiers arrivent en anglais** dans le profil d'un personnage,
-  mais en français dans les données statiques (`/data/wow/profession/{id}`).
-  On les y cherche une fois par métier, puis on les garde en base.
-- **Données à la dernière déconnexion**, et seulement à partir du niveau 10.
-  Un personnage introuvable garde ses métiers de la synchro précédente.
-- **Métiers principaux seulement** : l'API range déjà Cuisine, Pêche et
-  Secourisme à part, dans les secondaires. Aucune liste à maintenir.
+### Ce que l'API impose — mesuré sur la guilde, pas déduit de la doc
 
-- [ ] Identifiants Blizzard, région et slug de guilde dans `.env`
-- [ ] Client de l'API : jeton, roster, métiers d'un personnage, nom français d'un métier
-- [ ] Migration 004 : personnages, métiers, compétences
-- [ ] Synchro : roster, puis métiers de chaque membre, en une transaction
-- [ ] Un membre parti de la guilde disparaît de l'annuaire
-- [ ] Emoji par métier dans `professions.toml`, avec un repli
-- [ ] Un message dans #métiers : un bloc par métier, membres triés par compétence
-- [ ] Le message n'est réécrit que si les données ont changé
-- [ ] Synchro automatique chaque jour à 5 h, heure de Paris
-- [ ] `/annuaire` poste le message, `/annuaire-synchro` force une synchro
-- [ ] Limites d'un embed : un métier trop long se poursuit dans un second bloc
+La documentation de `develop.battle.net` ne couvre pas le namespace `forever`.
+Tout ce qui suit a été lu sur nos propres personnages, les 20 et 22 novembre.
 
-Fini quand : `/annuaire-synchro` liste les métiers des membres de la guilde,
-chacun avec sa compétence, et une seconde synchro sans changement ne touche
-pas au message.
+- **Namespaces propres à Forever** : `profile-forever-eu` pour les personnages,
+  `static-forever-eu` pour les données de jeu. Seule la région EU nous connaît.
+- **Pas de royaume.** Un personnage s'appelle `{prénom}-{nom}`
+  (`harx-windharrow`), une guilde son seul slug (`ah-sheep-here-wego-again`). Le
+  ruleset JcJ n'entre pas dans l'URL : c'est un champ de la réponse.
+- **Le namespace `profile` ignore `locale`** et répond toujours en anglais, même
+  avec `locale=fr_FR`. Le français vient de `/data/wow/recipe/{id}` en
+  `static-forever-eu`, qui rend le nom en 12 langues et l'objet fabriqué avec
+  lui. 503 recettes, aucune sans nom français.
+- **Niveau 10 minimum**, et seulement après une déconnexion. En dessous, tout
+  répond 404 : ces personnages sont comptés comme ignorés, pas comme en échec.
+- **Les 429 sont réels.** À concurrence 8, 44 appels sur 589 ont été refusés.
+  La concurrence est descendue à 4 et un refus est rejoué en respectant
+  `Retry-After` : plus aucun refus depuis.
+- **Rien n'est documenté**, donc rien n'est garanti : un champ peut disparaître
+  sans préavis. Le client traite une forme inattendue comme une absence de
+  donnée plutôt qu'en levant une erreur.
+
+Le nom d'une recette ne changeant jamais, la table `recipes` est un
+**dictionnaire permanent** : la synchro ne va chercher que les identifiants
+jamais vus. Une synchro quotidienne coûte donc **26 requêtes** (1 roster + 25
+personnages) et une dizaine de secondes, au lieu des ~525 du premier jour.
+
+**Cuisine, Secourisme et Pêche ne sont pas suivis** — un choix de la guilde, pas
+une contrainte de l'API : presque tout le monde les a et elles noyaient les
+vraies réponses (« bandage en lin » répondait 18 des 25 personnages). Elles
+portent `ignored = true` dans `professions.toml`, et c'est une liste
+d'exclusion : un métier que Blizzard ajouterait remonterait quand même, sous le
+nom anglais donné par l'API et avec un avertissement au journal.
+
+### 6a — Identité de la guilde en configuration
+
+- [x] `GUILD_NAME`, `GUILD_TAG` et le slug d'API dérivé, dans `Settings`
+- [x] Pied d'embed signé ASHWGA sur les tableaux existants
+
+### 6b — Client d'API, configuration, base (aucune surface Discord)
+
+- [x] Paquet `src/api/` : jeton client_credentials, roster, métiers, recette
+- [x] 404 → absence, 429 et 5xx rejoués, 401 renouvelle le jeton une fois
+- [x] `professions.toml` : clé, `blizzard_id`, nom français, emoji, `ignored`
+- [x] Migration `005_professions.sql` : roster, métiers, dictionnaire, recettes
+- [x] `ProfessionRepo` : tout le SQL de l'annuaire, recherche repliée incluse
+- [x] `MessageRepo` extrait de `ClassRepo` : `managed_messages` en un seul endroit
+
+### 6c — Synchro quotidienne et annuaire dans #métiers
+
+- [x] `sync_professions` : roster, puis métiers de chaque personnage visible
+- [x] Un personnage parti de la guilde disparaît de l'annuaire (cascade)
+- [x] Un message par métier dans #métiers, artisans triés par compétence
+- [x] Un métier que personne n'a reste affiché, vide : les messages ne bougent pas
+- [x] Édition des messages existants, jamais de repost ; 1,2 s entre deux
+- [x] Synchro automatique chaque jour à 5 h, heure de Paris, été comme hiver
+- [x] `/annuaire-métiers` poste ou met à jour, `/synchro-métiers` force une synchro
+
+### 6d — `/qui-métier`
+
+- [x] Recherche en base seule : accents, casse et langue sans importance
+- [x] Regroupement par recette, et fusion des recettes homonymes
+- [x] « Personne » distingue le nom inconnu de l'artisan perdu
+- [x] Réponse éphémère, cantonnée au salon des métiers
+
+### 6e — `/recettes`
+
+- [x] Autocomplétion du personnage, puis de ses métiers à lui
+- [x] Noms français, repli sur l'anglais tant qu'une recette n'est pas traduite
+- [x] Liste étalée sur plusieurs embeds, dans les 6000 caractères d'un message
+- [x] Réponse éphémère, même restriction de salon
+
+### Reste à faire
+
+- [ ] Déployer sur le VPS : `./scripts/reboot.sh --update`, puis dérouler la recette
+- [ ] Renommer l'application `TBDBot` sur le portail développeur Discord
+
+Fini quand : `/synchro-métiers` rend un compte-rendu sans échec, les neuf
+messages de #métiers correspondent au jeu, et les deux commandes répondent en
+français comme en anglais sans qu'aucun appel ne parte chez Blizzard.
 
 ### Scénario de recette — à dérouler
 
-Le `.env` du VPS doit d'abord recevoir les quatre variables `BLIZZARD_*`
-de `.env.example`, et `pip install -e .` y être relancé pour `tzdata`.
-La migration 004 s'applique seule au démarrage.
+Le `.env` du VPS doit d'abord recevoir `BLIZZARD_CLIENT_ID` et
+`BLIZZARD_CLIENT_SECRET` : ils n'ont pas de valeur par défaut, le bot refuse de
+démarrer sans eux. Rien à réinstaller — `aiohttp` vient avec discord.py, et
+`tzdata` ne sert qu'à Windows. La migration `005` s'applique seule au démarrage,
+et supprime au passage les tables de l'implémentation parallèle là où elles ont
+été créées.
+
+Préparer #métiers à la main une fois : pour `@everyone`, refuser « Envoyer des
+messages » et autoriser « Utiliser les commandes d'application » ; pour le bot,
+autoriser « Envoyer des messages », « Intégrer des liens » et « Voir les anciens
+messages ».
 
 | # | Action | Attendu |
 |---|--------|---------|
-| 1 | Démarrer le bot | Journal : migration 004 appliquée, aucune erreur |
-| 2 | `/annuaire-synchro` | « 25 personnage(s) lus sur 28 », la liste des invisibles, et la note « lance `/annuaire` » |
-| 3 | `/annuaire` dans #métiers | Un message, un bloc par métier avec son emoji, membres triés par compétence |
-| 4 | `/annuaire` une seconde fois | Refusé, avec le lien vers le message existant |
-| 5 | `/annuaire-synchro` | « Rien n'a changé », le message est réécrit à l'identique |
-| 6 | Changer un emoji dans `professions.toml`, redémarrer, `/annuaire-synchro` | Le nouvel emoji apparaît dans **le même** message |
-| 7 | Supprimer le message, `/annuaire-synchro` | La note « lance `/annuaire` » revient, aucune erreur |
-| 8 | `/annuaire`, puis attendre le lendemain 5 h | Journal : « Directory synced », message édité seulement si un métier a bougé |
+| 1 | `./scripts/reboot.sh --update` | Journal : migration `005` appliquée, « Daily profession sync scheduled for 05h00 », « Synced N command(s) » |
+| 2 | `/synchro-métiers` | 25 personnages, 48 métiers, ~1130 liens, ~500 recettes nommées, 0 échec |
+| 3 | `/annuaire-métiers` | Neuf messages dans #métiers, un par métier suivi, ni Cuisine ni Secourisme ni Pêche |
+| 4 | `/synchro-métiers` une seconde fois | « 0 nouvellement nommée(s) », quelques secondes : le dictionnaire a servi |
+| 5 | `/annuaire-métiers` une seconde fois | Les mêmes neuf messages édités, aucun nouveau |
+| 6 | `/qui-métier objet:Cape élégante en cuir` | Les artisans, compétence en tête, du plus compétent au moins |
+| 7 | Le même en anglais (`Fine Leather Cloak`) | Exactement la même liste |
+| 8 | `/qui-métier objet:bandage en lin` | « Aucune recette ne porte ce nom », et les trois métiers non suivis nommés |
+| 9 | `/recettes` sur un artisan à 300 | Autocomplétion des deux champs, liste complète, pied avec le compte et la compétence |
+| 10 | Les deux commandes depuis #général | Refus éphémère nommant #métiers |
+| 11 | Supprimer un message de #métiers, `/synchro-métiers` | Aucune erreur ; `/annuaire-métiers` le repose |
+| 12 | `Ctrl-C`, relancer, `/qui-métier` | Même réponse, aucun appel à Blizzard : la base est le cache |
+| 13 | `PROFESSION_SYNC_HOUR` à quelques minutes, relancer, attendre | La synchro part seule et les neuf messages sont réécrits |
 
-L'étape 5 vérifie qu'une synchro sans changement est sans effet sur les
-données ; l'étape 8, que la synchro quotidienne tourne seule.
+L'étape 4 est la décisive : elle prouve que le dictionnaire de recettes évite
+500 requêtes par jour. L'étape 12 prouve que le cache en est bien un.
 
-## Étape 7 — Recettes connues
+## Étape 7 — Recettes connues — absorbée par l'étape 6
 
-Pas commencée. Les recettes sont dans la même réponse de l'API que les
-métiers, avec leur ID ; leur nom français s'obtient comme celui des métiers.
-
-- [ ] Stocker les recettes connues à la synchro, noms français en cache
-- [ ] Commande : un personnage et un objet, en français ou en anglais
-- [ ] Commande : toutes les recettes d'un artisan
-- [ ] Réponses éphémères : seul l'auteur de la commande les voit
+Elle n'a plus d'objet. Les recettes arrivent dans la même réponse de l'API que
+les métiers : elles sont stockées à la synchro, et les deux commandes prévues
+ici sont `/qui-métier` (6d) et `/recettes` (6e).
 
 ## Avant d'inviter les membres
 
 - [x] Créer un serveur de test et y reproduire la structure
 - [ ] Passer les vérifications de permissions avec un second compte
-- [ ] Choisir et configurer l'hébergement
+- [x] Choisir et configurer l'hébergement
 - [ ] Sauvegarde automatique de la base
