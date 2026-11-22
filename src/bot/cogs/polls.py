@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.autocomplete import AUTOCOMPLETE_LIMIT, CHOICE_NAME_LIMIT
 from bot.permissions import missing_permissions, staff_only
 from bot.reactions import add_ballot_reactions, fetch_poll_message
 from bot.rendering import poll_embed, results_embed
@@ -20,9 +21,6 @@ if TYPE_CHECKING:
     from bot.client import GuildBot
 
 _log = logging.getLogger(__name__)
-
-CHOICE_NAME_LIMIT = 100
-AUTOCOMPLETE_LIMIT = 25
 
 UNKNOWN_POLL = "Sondage inconnu. Vérifie la clé dans `polls.toml`."
 NOT_OPENED = "Ce sondage n'a pas encore été ouvert. Lance `/sondage {key}` d'abord."

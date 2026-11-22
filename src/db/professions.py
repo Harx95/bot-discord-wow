@@ -420,12 +420,28 @@ class ProfessionRepo:
                 for row in await cursor.fetchall()
             ]
 
-    async def characters_like(self, prefix: str, limit: int = ANSWER_LIMIT) -> list[str]:
-        """Character slugs for autocompletion, only those that have a profession."""
+    async def character(self, slug: str) -> RosterCharacter | None:
+        """One stored character, or None when the slug is not on the roster."""
+        async with self._db.execute(
+            "SELECT * FROM roster_characters WHERE slug = ?", (slug,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return _to_character(row) if row is not None else None
+
+    async def characters_like(
+        self,
+        prefix: str,
+        limit: int = ANSWER_LIMIT,
+    ) -> list[RosterCharacter]:
+        """Characters for autocompletion, only those that have a profession.
+
+        Whole characters rather than slugs: a choice shows "Rka-Kamechki" and sends back
+        "rka-kamechki", and display_name already knows how to spell the first from the row.
+        """
         term = fold(prefix)
         async with self._db.execute(
             """
-            SELECT DISTINCT c.slug, c.name, c.surname
+            SELECT DISTINCT c.*
             FROM roster_characters c
             JOIN character_professions p ON p.slug = c.slug
             WHERE ? = '' OR c.slug LIKE '%' || ? || '%'
@@ -434,7 +450,7 @@ class ProfessionRepo:
             """,
             (term, term.replace(" ", "-"), limit),
         ) as cursor:
-            return [row["slug"] for row in await cursor.fetchall()]
+            return [_to_character(row) for row in await cursor.fetchall()]
 
     async def counts(self) -> tuple[int, int, int, int]:
         """Characters, professions, recipe links and distinct recipes currently stored."""

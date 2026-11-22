@@ -426,7 +426,8 @@ async def test_autocompletion_offers_only_characters_with_a_profession(
     """A level 2 character has nothing to show, so offering it would waste a choice."""
     await _seed(professions)
 
-    assert await professions.characters_like("") == [MHAS.slug, RKA.slug]
+    found = await professions.characters_like("")
+    assert [character.slug for character in found] == [MHAS.slug, RKA.slug]
 
 
 async def test_autocompletion_matches_a_fragment_of_either_name(
@@ -434,15 +435,36 @@ async def test_autocompletion_matches_a_fragment_of_either_name(
 ) -> None:
     await _seed(professions)
 
-    assert await professions.characters_like("kamech") == [RKA.slug]
-    assert await professions.characters_like("MHAS") == [MHAS.slug]
+    assert [c.slug for c in await professions.characters_like("kamech")] == [RKA.slug]
+    assert [c.slug for c in await professions.characters_like("MHAS")] == [MHAS.slug]
 
 
 async def test_autocompletion_folds_what_was_typed(professions: ProfessionRepo) -> None:
     """A member typing "Rka Kamechki" with a space must still find rka-kamechki."""
     await _seed(professions)
 
-    assert await professions.characters_like("Rka Kamechki") == [RKA.slug]
+    assert [c.slug for c in await professions.characters_like("Rka Kamechki")] == [RKA.slug]
+
+
+async def test_autocompletion_carries_the_name_members_say(
+    professions: ProfessionRepo,
+) -> None:
+    """A choice reads "Rka-Kamechki" and sends back the slug the API uses."""
+    await _seed(professions)
+
+    found = await professions.characters_like("rka")
+
+    assert [(c.display_name, c.slug) for c in found] == [("Rka-Kamechki", "rka-kamechki")]
+
+
+async def test_one_character_can_be_looked_up_by_slug(professions: ProfessionRepo) -> None:
+    await _seed(professions)
+
+    found = await professions.character(RKA.slug)
+
+    assert found is not None
+    assert found.display_name == "Rka-Kamechki"
+    assert await professions.character("personne-du-tout") is None
 
 
 # --- the sync record ------------------------------------------------------------------

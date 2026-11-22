@@ -9,9 +9,13 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from api import ForeverApiError
+from bot.autocomplete import choices
 from bot.crafters import who_can_craft
 from bot.directory import GUILD_TIMEZONE, publish_directory, refresh_directory
 from bot.permissions import missing_permissions, staff_only
+from bot.recipes import recipes_of
+from db import ProfessionRepo
+from domain import fold
 
 if TYPE_CHECKING:
     from bot.client import GuildBot
@@ -193,3 +197,70 @@ class Professions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         embed = await who_can_craft(self.bot, objet)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    async def _characters(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Suggest characters that have at least one profession, on what has been typed."""
+        found = await ProfessionRepo(self.bot.db).characters_like(current)
+        return choices((character.display_name, character.slug) for character in found)
+
+    async def _professions(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[int]]:
+        """Suggest the professions of the character already picked, when one is.
+
+        interaction.namespace carries the options filled in so far, under the names Discord
+        knows them by. Before a character is chosen there is nothing to narrow, so the
+        whole tracked list is offered rather than an empty box.
+        """
+        slug = getattr(interaction.namespace, "personnage", "") or ""
+        held = await ProfessionRepo(self.bot.db).professions_of(slug) if slug else []
+        if held:
+            catalog = self.bot.professions
+            offered = [
+                (
+                    definition.label if definition else profession.api_name,
+                    profession.blizzard_id,
+                )
+                for profession in held
+                if (definition := catalog.by_id(profession.blizzard_id)) is None
+                or not definition.ignored
+            ]
+        else:
+            offered = [(d.label, d.blizzard_id) for d in self.bot.professions.tracked]
+
+        needle = fold(current)
+        return choices((label, value) for label, value in offered if needle in fold(label))
+
+    @app_commands.command(
+        name="recettes",
+        description="Liste les recettes apprises par un personnage dans un métier.",
+    )
+    # The Python identifier stays ASCII; only what Discord displays carries the accent.
+    @app_commands.rename(metier="métier")
+    @app_commands.describe(
+        personnage="Le personnage, à choisir dans la liste",
+        metier="Le métier, à choisir dans la liste",
+    )
+    # One decorator per parameter: a single call ties both to the same choice type, and
+    # these two do not agree -- a character is a slug, a profession an id.
+    @app_commands.autocomplete(personnage=_characters)
+    @app_commands.autocomplete(metier=_professions)
+    async def recipes(
+        self,
+        interaction: discord.Interaction,
+        personnage: str,
+        metier: int,
+    ) -> None:
+        """Answer from the database only, and only to the member who asked."""
+        if await self._outside_channel(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        embeds = await recipes_of(self.bot, personnage, metier)
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
