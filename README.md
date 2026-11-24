@@ -226,6 +226,10 @@ La synchro automatique part tous les jours à l'heure de `PROFESSION_SYNC_HOUR`
 
 ### Les deux commandes de membre
 
+`docs/aide-metiers.md` est le mode d'emploi destiné aux membres : il se copie tel
+quel dans le salon des métiers et s'y épingle. À garder sous 2000 caractères,
+sinon Discord refuse le message — un test le vérifie.
+
 Elles ne répondent que dans le salon des métiers, et toujours en **éphémère** :
 c'est ce qui permet de laisser les membres les lancer là sans pouvoir y écrire,
 sans qu'ils voient les recherches des autres. Il faut donc, dans ce salon :
@@ -242,6 +246,13 @@ nommées pareil.
 Quand personne ne peut fabriquer l'objet, la réponse distingue deux cas : un nom
 qu'aucune recette ne porte, et une recette que la guilde connaissait mais que plus
 personne ne sait faire — la personne est partie, ou son métier n'est pas suivi.
+
+Une réponse s'efface au bout de dix minutes. La suppression passe par le jeton de
+l'interaction, que Discord invalide **un quart d'heure** après la commande : c'est
+un plafond, pas un réglage. Rien ne s'accumule pour autant — une réponse éphémère
+n'est pas stockée dans le salon, elle vit dans le client de la personne, s'en va
+d'elle-même au rechargement de Discord et porte un bouton « Supprimer le
+message ».
 
 `/recettes` propose les personnages en autocomplétion, puis **les métiers de ce
 personnage-là**. Une liste trop longue se poursuit sur plusieurs embeds du même
