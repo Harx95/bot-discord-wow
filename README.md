@@ -247,12 +247,15 @@ Quand personne ne peut fabriquer l'objet, la réponse distingue deux cas : un no
 qu'aucune recette ne porte, et une recette que la guilde connaissait mais que plus
 personne ne sait faire — la personne est partie, ou son métier n'est pas suivi.
 
-Une réponse s'efface au bout de dix minutes. La suppression passe par le jeton de
-l'interaction, que Discord invalide **un quart d'heure** après la commande : c'est
-un plafond, pas un réglage. Rien ne s'accumule pour autant — une réponse éphémère
-n'est pas stockée dans le salon, elle vit dans le client de la personne, s'en va
-d'elle-même au rechargement de Discord et porte un bouton « Supprimer le
-message ».
+Rien ne supprime une réponse, et rien n'a à le faire : une réponse éphémère n'est
+pas stockée dans le salon, elle vit dans le client de la personne. Elle n'entre
+donc pas dans l'historique, s'en va d'elle-même au rechargement de Discord, et
+porte un bouton « Supprimer le message » en attendant.
+
+Une suppression par le bot aurait de toute façon été plafonnée à **un quart
+d'heure** : elle passe par le jeton de l'interaction, que Discord invalide passé
+ce délai. C'est aussi pour cette raison que discord.py limite à quinze minutes le
+délai d'expiration d'un composant éphémère.
 
 `/recettes` propose les personnages en autocomplétion, puis **les métiers de ce
 personnage-là**. Une liste trop longue se poursuit sur plusieurs embeds du même

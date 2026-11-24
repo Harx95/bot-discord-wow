@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from bot.cogs.professions import ANSWER_LIFETIME, GUILD_TIMEZONE, Professions
+from bot.cogs.professions import GUILD_TIMEZONE, Professions
 
 if TYPE_CHECKING:
     from bot.client import GuildBot
@@ -80,10 +80,3 @@ async def test_the_loop_starts_on_load_and_stops_on_unload(cog: Professions) -> 
     await asyncio.sleep(0)
 
     assert not cog.daily_sync.is_running()
-
-
-def test_an_answer_is_taken_back_inside_the_token_lifetime() -> None:
-    """Discord invalidates the interaction token after 15 minutes, and the deletion needs
-    it: past that, the answer could only be dismissed by the member or by a reload.
-    """
-    assert ANSWER_LIFETIME < 15 * 60

@@ -26,7 +26,7 @@ Les deux champs se complètent tout seuls : commence à taper, puis choisis dans
 
 ## À savoir
 
-- **Les réponses n'arrivent qu'à toi**, personne d'autre ne les voit. Elles s'effacent au bout de 10 minutes, ou tout de suite avec le bouton **Supprimer le message**.
+- **Les réponses n'arrivent qu'à toi**, personne d'autre ne les voit jamais. Elles ne restent pas dans le salon : elles disparaissent dès que tu recharges Discord, et tout de suite si tu cliques sur **Supprimer le message**.
 - **Cuisine, Secourisme et Pêche ne sont pas suivis** : presque tout le monde les a, et ils noyaient les vraies réponses.
 - Un personnage **sous le niveau 10** est invisible pour l'API de Blizzard. Un métier monté depuis ta dernière déconnexion n'apparaît qu'à la synchro suivante.
 - Un trou, une bizarrerie ? Préviens un officier : `/synchro-métiers` relit tout immédiatement.

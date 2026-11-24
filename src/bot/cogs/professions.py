@@ -33,14 +33,6 @@ MESSAGE_LIMIT = 2000
 QUERY_MIN = 2
 QUERY_MAX = 100
 
-# How long an answer stays before the bot takes it back. Deleting it goes through the
-# interaction token, which Discord invalidates 15 minutes after the command, so this is a
-# ceiling rather than a preference -- a longer life is impossible, not unimplemented. Ten
-# minutes is time to read an answer and well inside that. Nothing is lost if the bot
-# restarts first: an ephemeral answer lives in the member's client, not in the channel, so
-# it leaves on its own when Discord reloads, and carries a "Dismiss message" button.
-ANSWER_LIFETIME = 600.0
-
 NO_CHANNEL = (
     "Le salon des métiers est introuvable. Vérifie PROFESSIONS_CHANNEL_ID : il vaut "
     "actuellement {channel_id}."
@@ -201,18 +193,13 @@ class Professions(commands.Cog):
         if await self._outside_channel(interaction):
             return
 
-        # Answered without deferring: the search is a few indexed reads of a local file,
-        # far inside the three seconds Discord allows. That is what buys delete_after,
-        # which followup.send does not carry -- it deletes the original response, and a
-        # deferred answer is a followup rather than that.
-        #
-        # Ephemeral throughout: that alone is what keeps one member's searches to themselves.
+        # Ephemeral throughout: that alone is what keeps one member's searches to
+        # themselves. Nothing takes the answer back, and nothing needs to: an ephemeral
+        # message is not stored in the channel, it lives in the member's client, where it
+        # carries a dismiss button and leaves on its own when Discord reloads.
+        await interaction.response.defer(ephemeral=True)
         embed = await who_can_craft(self.bot, objet)
-        await interaction.response.send_message(
-            embed=embed,
-            ephemeral=True,
-            delete_after=ANSWER_LIFETIME,
-        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def _characters(
         self,
@@ -277,10 +264,6 @@ class Professions(commands.Cog):
         if await self._outside_channel(interaction):
             return
 
-        # Not deferred either, for the same reason: see who_crafts.
+        await interaction.response.defer(ephemeral=True)
         embeds = await recipes_of(self.bot, personnage, metier)
-        await interaction.response.send_message(
-            embeds=embeds,
-            ephemeral=True,
-            delete_after=ANSWER_LIFETIME,
-        )
+        await interaction.followup.send(embeds=embeds, ephemeral=True)

@@ -9,11 +9,13 @@ Le jeu est sorti le 4 novembre. Les sondages sont clos et leurs messages
 conservés sur le serveur. Le bot tourne sur le VPS, en service systemd
 `bot-wow.service`. La guilde s'appelle « Ah sheep here wego again ».
 
-**L'étape 6 est écrite et testée** : l'annuaire des métiers, refondu autour de
-l'API Blizzard, plus aucune saisie par les membres. Les étapes 6a à 6c sont
-déployées et vérifiées sur le serveur ; `/qui-métier` et `/recettes` (6d, 6e)
-attendent le prochain déploiement — `./scripts/reboot.sh --update` sur le VPS,
-puis le scénario de recette de l'étape 6.
+**L'étape 6 est écrite, testée et déployée** : l'annuaire des métiers, refondu
+autour de l'API Blizzard, plus aucune saisie par les membres. Les cinq
+sous-étapes 6a à 6e tournent sur le serveur depuis le 24 novembre.
+
+Il reste à épingler `docs/aide-metiers.md` dans #métiers, à dérouler le scénario
+de recette de l'étape 6 en entier, et à renommer l'application `TBDBot` sur le
+portail développeur Discord.
 
 ### Historique — 1er octobre 2026
 
@@ -576,9 +578,29 @@ nom anglais donné par l'API et avec un avertissement au journal.
 - [x] Liste étalée sur plusieurs embeds, dans les 6000 caractères d'un message
 - [x] Réponse éphémère, même restriction de salon
 
-### Reste à faire
+### Les réponses éphémères ne s'accumulent pas
 
-- [ ] Déployer sur le VPS : `./scripts/reboot.sh --update`, puis dérouler la recette
+Question posée le 24 novembre : faut-il effacer les réponses au bout d'un jour,
+pour qu'un membre ne se retrouve pas noyé après des mois ?
+
+Non, et c'est impossible de toute façon. Une réponse éphémère **n'est pas stockée
+dans le salon** : elle n'entre pas dans l'historique, personne d'autre ne la voit,
+elle vit dans le client de la personne et s'en va d'elle-même au rechargement de
+Discord, avec un bouton « Supprimer le message » en attendant. Et une suppression
+par le bot serait plafonnée à **un quart d'heure** : elle passe par le jeton de
+l'interaction, que Discord invalide passé ce délai — c'est pour la même raison que
+discord.py limite à quinze minutes l'expiration d'un composant éphémère.
+
+Un `delete_after` de dix minutes a été écrit puis retiré le même jour : il
+n'enlevait rien que Discord n'enlève déjà, et il faisait disparaître une réponse
+sous les yeux de qui la lisait encore.
+
+### Déploiement et mode d'emploi
+
+- [x] Déployé sur le VPS le 24 novembre : `./scripts/reboot.sh --update`
+- [x] `docs/aide-metiers.md` — mode d'emploi des deux commandes pour les membres
+- [ ] Coller `docs/aide-metiers.md` dans #métiers et l'épingler
+- [ ] Dérouler le scénario de recette ci-dessous en entier
 - [ ] Renommer l'application `TBDBot` sur le portail développeur Discord
 
 Fini quand : `/synchro-métiers` rend un compte-rendu sans échec, les neuf
@@ -611,6 +633,7 @@ messages ».
 | 8 | `/qui-métier objet:bandage en lin` | « Aucune recette ne porte ce nom », et les trois métiers non suivis nommés |
 | 9 | `/recettes` sur un artisan à 300 | Autocomplétion des deux champs, liste complète, pied avec le compte et la compétence |
 | 10 | Les deux commandes depuis #général | Refus éphémère nommant #métiers |
+| 10b | Recharger Discord (`Ctrl+R`) après une réponse | La réponse a disparu d'elle-même : rien ne s'accumule |
 | 11 | Supprimer un message de #métiers, `/synchro-métiers` | Aucune erreur ; `/annuaire-métiers` le repose |
 | 12 | `Ctrl-C`, relancer, `/qui-métier` | Même réponse, aucun appel à Blizzard : la base est le cache |
 | 13 | `PROFESSION_SYNC_HOUR` à quelques minutes, relancer, attendre | La synchro part seule et les neuf messages sont réécrits |
